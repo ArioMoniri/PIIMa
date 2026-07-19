@@ -14,13 +14,26 @@
 
       A CSP is declared as a second, enforced line of defence, so that a future
       edit which adds a tracking pixel or a font is blocked by the browser
-      rather than merely disapproved of in review. `connect-src 'none'` is the
-      load-bearing directive: it forbids fetch, XHR, WebSocket, EventSource and
-      sendBeacon outright.
+      rather than merely disapproved of in review.
+
+      `connect-src 'self'` is the load-bearing directive: same-origin only. It
+      permits exactly the one request this page must make -- loading its own
+      `.wasm` from this directory, the third item in the list above -- and
+      forbids every cross-origin fetch, XHR, WebSocket, EventSource and beacon.
+      An earlier revision said `'none'`, which reads stronger and was in fact
+      broken: it blocked the module's own load, so the panel never started. A
+      security control that prevents the product from running is not a stricter
+      control, it is a bug that happens to fail closed.
+
+      The claim being made is about CLINICAL TEXT, and it is unchanged: nothing
+      you type into the box below can leave this tab. Open devtools, switch to
+      the Network tab, reload, then paste a note and press the button. You will
+      see the document, the glue and the .wasm module, and no request whatsoever
+      after that, no matter what you paste.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'; form-action 'none'; base-uri 'none'"
+      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'none'; font-src 'none'; form-action 'none'; base-uri 'none'"
     />
     <style>
       body {
@@ -100,109 +113,6 @@
     <h2>Network</h2>
     <p class="verdict" id="verdict">not run yet</p>
 
-    <script type="module">
-      // Booby-trap every networking global BEFORE the module loads, so a call
-      // from anywhere -- our code, the glue, a future dependency -- is recorded
-      // rather than merely forbidden by the CSP. The CSP blocks; this counts.
-      const fired = [];
-      for (const name of [
-        "fetch",
-        "XMLHttpRequest",
-        "WebSocket",
-        "EventSource",
-        "WebTransport",
-        "RTCPeerConnection",
-      ]) {
-        globalThis[name] = function trapped() {
-          fired.push(name);
-          throw new Error(`${name} was called`);
-        };
-      }
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon = () => {
-          fired.push("navigator.sendBeacon");
-          return false;
-        };
-      }
-
-      // `../pkg-web/` is the `wasm-pack build --target web` output. A relative
-      // path, same origin, no CDN.
-      const wasm = await import("../pkg-web/deid_tr_wasm.js");
-      await wasm.default();
-
-      // A checksum-valid TCKN, COMPUTED rather than written into this file (I8).
-      const stem = [1, 2, 3, 4, 5, 6, 7, 8, 9];
-      const odd = stem.filter((_, i) => i % 2 === 0).reduce((a, b) => a + b, 0);
-      const even = stem.filter((_, i) => i % 2 === 1).reduce((a, b) => a + b, 0);
-      const tenth = (odd * 7 + 100 - even) % 10;
-      const eleventh = [...stem, tenth].reduce((a, b) => a + b, 0) % 10;
-      const tckn = [...stem, tenth, eleventh].join("");
-
-      const note = document.getElementById("note");
-      note.value = `Hasta Ayşe Yılmaz, TCKN ${tckn}, tel 0(532) 000 00 00.\nOp. Dr. Şükrü Gökçe tarafından görüldü; carcinoma'lı lezyon, MRI'da izlendi.`;
-
-      const output = document.getElementById("output");
-      const spans = document.getElementById("spans");
-      const verdict = document.getElementById("verdict");
-      const restore = document.getElementById("restore");
-      let last = null;
-
-      function report() {
-        verdict.textContent =
-          fired.length === 0
-            ? `no network call was made (${wasm.version()}). Check the Network tab: this document, the glue and the .wasm module, nothing else.`
-            : `FAILED: ${fired.join(", ")}`;
-      }
-
-      document.getElementById("run").addEventListener("click", () => {
-        spans.replaceChildren();
-        try {
-          // The tier is passed explicitly at every call. There is no default,
-          // because both defaults are wrong in a different direction.
-          //
-          // The salt is the page's job: the wasm module links neither js-sys
-          // nor web-sys (that is what keeps `fetch` out of its import table),
-          // so it cannot reach crypto.getRandomValues itself. A fresh one per
-          // run is SaltScope::Document -- two runs are not linkable.
-          const salt = new Uint8Array(32);
-          crypto.getRandomValues(salt);
-          last = wasm.deidentify(note.value, wasm.Tier.SafeHarbor, salt);
-        } catch (error) {
-          output.textContent = `error: ${error.message}`;
-          report();
-          return;
-        }
-        output.textContent = last.text;
-        restore.disabled = false;
-        for (let i = 0; i < last.spanCount; i += 1) {
-          const span = last.span(i);
-          const row = document.createElement("tr");
-          for (const cell of [
-            `${span.start}..${span.end}`,
-            span.label,
-            span.layer,
-            span.decision,
-            span.checksumValidated ? "yes" : "-",
-            span.replacement ?? "-",
-          ]) {
-            const td = document.createElement("td");
-            td.textContent = cell;
-            row.append(td);
-          }
-          spans.append(row);
-        }
-        report();
-      });
-
-      restore.addEventListener("click", () => {
-        if (!last) return;
-        // The round trip: the span map's OUTPUT offsets make this exact even
-        // when two identifiers share a replacement.
-        output.textContent = last.reidentify();
-        report();
-      });
-
-      report();
-    </script>
+    <script type="module" src="./panel.js"></script>
   </body>
 </html>
