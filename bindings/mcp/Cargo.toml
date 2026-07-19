@@ -1,0 +1,33 @@
+[package]
+name = "deid-tr-mcp"
+description = "stdio JSON-RPC MCP gateway for deid-tr: mask on the way out to a cloud model, re-identify on the way back."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# WHY THERE IS NO NETWORK DEPENDENCY HERE, in the one binding whose entire job is to sit
+# between a clinician and a cloud model.
+#
+# The gateway never speaks to the cloud model itself. It speaks JSON-RPC over stdin/stdout to
+# an MCP CLIENT, and the client is the process that holds the model credentials and opens the
+# socket. That split is the whole security argument: this binary can hold the span map -- the
+# single most sensitive structure in the product, the literal mapping from surrogate back to
+# real PHI -- precisely because it has no way to send it anywhere. `tests/no_listener.rs`
+# asserts the absence structurally rather than trusting this comment.
+#
+# I3 follows for free: a process with no socket library binds no address, so there is no
+# all-interfaces default to get wrong. If a socket transport is ever added it goes behind an
+# explicit flag, loopback only, with a bearer token and a startup warning -- see README.md.
+[dependencies]
+deid-tr-core = { path = "../../core" }
+# CSPRNG for session handles. A session handle is a bearer capability over a span map, so it is
+# drawn from the OS entropy source and never from a counter, a timestamp, or a hash of either.
+# getrandom is the OS syscall and nothing else: no socket, no allocation, no global state.
+getrandom = "0.3"
+serde_json = "1"
+thiserror = "2"
+
+[[bin]]
+name = "deid-mcp"
+path = "src/main.rs"

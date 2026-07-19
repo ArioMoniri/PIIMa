@@ -1,0 +1,719 @@
+# deid-tr entity schema.
+#
+# This file is the SINGLE SOURCE OF TRUTH for the label vocabulary. The Rust
+# `EntityLabel` enum, the eval harness, the annotation guidelines, the L4
+# allowlist loader and every model card key off the `id` fields below. A label
+# that does not appear here does not exist anywhere else in the project.
+#
+# Three classes live here, and they are scored by three different mechanisms.
+# Conflating them is the mistake that makes de-identification benchmarks lie:
+#   A. direct     -> numeric recall gate per entity type
+#   B. quasi      -> re-ID red-team rate, no per-entity F1
+#   C. allowlist  -> false-positive rate on a NEGATIVE set
+
+meta:
+  schema_version: "1.0.0"
+  language: ["tr"]
+  # Turkish clinical prose is saturated with Latin and English medical
+  # vocabulary; the register is part of the language definition, not noise.
+  medical_register: ["la", "en"]
+  license: "Apache-2.0"
+  thresholds_file: "eval/thresholds.yaml"
+  allowlist_dir: "eval/allowlist/"
+
+# =============================================================================
+# CLASS A - DIRECT IDENTIFIERS (HIPAA Safe Harbor 18, mapped to Turkish
+# clinical reality).
+#
+# THRESHOLD RULE: every `recall_threshold` below is a FLOOR. It may only ever
+# be RAISED, never lowered. A build that goes red against one of these numbers
+# has found a detection bug, not a bad threshold (invariant I2: recall is the
+# product, precision is a feature). Lowering one requires an ADR in
+# docs/DECISIONS.md plus explicit human approval in-session, and is blocked by
+# scripts/hooks/guard_invariants.sh.
+#
+# `checksum_validatable: true` entries additionally carry
+# `precision_threshold: 1.000` - a checksum-valid TCKN/VKN/IBAN is never a
+# false positive, so any precision loss there is a rule bug.
+#
+# All `examples_synthetic` values are fabricated. Every national-ID-shaped
+# example is deliberately CHECKSUM-INVALID so the I8 pre-commit hook never has
+# to reject our own schema.
+# =============================================================================
+direct_identifiers:
+
+  - id: PATIENT_NAME
+    hipaa_category: "Names"
+    identifier_class: direct
+    detector: ner
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Given name, surname or full name of the patient, including agglutinated case-suffixed forms."
+    examples_synthetic:
+      - "Ayşe Yılmaz"
+      - "Mehmet Öztürk"
+      - "Zeynep Kara'nın"
+      - "Şükrü Gökçe"
+
+  - id: CLINICIAN_NAME
+    hipaa_category: "Names"
+    identifier_class: direct
+    detector: ner
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Name of a physician, nurse or other care provider, usually preceded by a Turkish title."
+    examples_synthetic:
+      - "Op. Dr. Emre Şahin"
+      - "Prof. Dr. Nilüfer Aydın"
+      - "Uz. Dr. Barış Toprak"
+      - "Hemş. Fatma Demir"
+
+  - id: RELATIVE_NAME
+    hipaa_category: "Names"
+    identifier_class: direct
+    detector: ner
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Name of a relative, guardian or employer of the patient appearing in the narrative."
+    examples_synthetic:
+      - "annesi Hatice Yıldırım"
+      - "eşi Kemal Doğan"
+      - "kızı Elif Arslan'a"
+
+  - id: TCKN
+    hipaa_category: "Social Security numbers"
+    identifier_class: direct
+    detector: rules
+    tr_specific: true
+    checksum_validatable: true
+    recall_threshold: 0.98
+    precision_threshold: 1.000
+    description: "Turkish national identification number: 11 digits, first digit non-zero, two trailing check digits."
+    examples_synthetic:
+      - "12345678951"
+      - "23456789131"
+      - "98765432151'in"
+
+  - id: VKN
+    hipaa_category: "Account numbers"
+    identifier_class: direct
+    detector: rules
+    tr_specific: true
+    checksum_validatable: true
+    recall_threshold: 0.98
+    precision_threshold: 1.000
+    description: "Turkish tax identification number: 10 digits with its own check-digit algorithm; identifies self-employed patients and payers."
+    examples_synthetic:
+      - "9876543210"
+      - "1111111111"
+      - "4820000001"
+
+  - id: SGK_NO
+    hipaa_category: "Health plan beneficiary numbers"
+    identifier_class: direct
+    detector: rules
+    tr_specific: true
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Turkish social security (SGK) registration or beneficiary number used for reimbursement."
+    examples_synthetic:
+      - "SGK No: 0000123456789012345678"
+      - "sicil 2200000000123"
+      - "SGK sicil no 1000000000001"
+
+  - id: MRN
+    hipaa_category: "Medical record numbers"
+    identifier_class: direct
+    detector: rules
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Hospital-local medical record or protocol number (protokol no, dosya no)."
+    examples_synthetic:
+      - "Protokol No: 2026-0004312"
+      - "Dosya No 000884-21"
+      - "MRN P-0000431"
+
+  - id: PASSPORT_NO
+    hipaa_category: "Certificate/license numbers"
+    identifier_class: direct
+    detector: rules
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Passport number; Turkish passports are one letter followed by eight digits."
+    examples_synthetic:
+      - "U00000431"
+      - "pasaport no: A12345678"
+
+  - id: IBAN
+    hipaa_category: "Account numbers"
+    identifier_class: direct
+    detector: rules
+    tr_specific: true
+    checksum_validatable: true
+    recall_threshold: 0.98
+    precision_threshold: 1.000
+    description: "Turkish IBAN: 26 characters beginning TR, validated by ISO 7064 mod-97 == 1."
+    examples_synthetic:
+      - "TR98 0009 9012 3456 7800 0000 01"
+      - "TR11 0006 4000 0011 2345 6789 01"
+
+  - id: PHONE
+    hipaa_category: "Telephone numbers"
+    identifier_class: direct
+    detector: rules
+    tr_specific: true
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Turkish telephone number in any surface form: +90 5XX, 0(5XX), 05XX, or spaced/dotted landline forms."
+    examples_synthetic:
+      - "+90 532 000 00 00"
+      - "0(555) 000 00 00"
+      - "05320000000"
+      - "0212 000 00 00"
+
+  - id: EMAIL
+    hipaa_category: "Electronic mail addresses"
+    identifier_class: direct
+    detector: rules
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Electronic mail address of patient, relative or clinician."
+    examples_synthetic:
+      - "ayse.yilmaz@ornek-eposta.example"
+      - "hasta0431@ornek-hastane.example"
+
+  - id: URL
+    hipaa_category: "Web Universal Resource Locators (URLs)"
+    identifier_class: direct
+    detector: rules
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "URL that resolves to a patient-specific resource, portal account or personal page."
+    examples_synthetic:
+      - "https://ornek-hastane.example/hasta/0000431"
+      - "www.ornek-portal.example/kayit?id=884"
+
+  - id: IP_ADDRESS
+    hipaa_category: "Internet Protocol (IP) address numbers"
+    identifier_class: direct
+    detector: rules
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "IPv4 or IPv6 address recorded in a note, device log line or teleconsultation record."
+    examples_synthetic:
+      - "192.0.2.14"
+      - "198.51.100.7"
+      - "2001:db8::4a"
+
+  - id: DATE
+    hipaa_category: "All elements of dates (except year)"
+    identifier_class: direct
+    detector: rules
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.97
+    # WHY A ROLE-LESS DATE EXISTS. The four labels below name what a date IS TO
+    # THE PATIENT - birth, admission, discharge, death - and that is a fact
+    # about the surrounding sentence, not about the digits. L1 reads a regex; it
+    # can see `Doğum Tarihi:` and it cannot see that an undated line in a
+    # narrative is describing an admission. Without this entry L1 had to pick
+    # one of the four for every date it found, and picking wrong is strictly
+    # worse than declining: `match_spans` requires the labels to agree, so one
+    # correctly-located date under the wrong role scores as a MISS on the true
+    # role AND a FALSE POSITIVE on the guessed one. 179 of them did.
+    #
+    # The floor is the general date floor (0.97), not DATE_BIRTH's 0.98: this
+    # label is the residue after role assignment, so holding it to the
+    # re-identification-triple floor would be asserting a role it declines to
+    # claim. L2/L4 refine DATE into one of the four; nothing masks less because
+    # a date arrived here.
+    description: "A date with no role cue in reach: located, calendar-valid, and deliberately not assigned to birth/admission/discharge/death by L1."
+    examples_synthetic:
+      - "12.03.2024"
+      - "12 Mart 2024"
+      - "2024-03-12"
+
+  - id: DATE_BIRTH
+    hipaa_category: "All elements of dates (except year)"
+    identifier_class: direct
+    detector: ner
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    # Date of birth is treated at the NAME/ID/CONTACT floor rather than the
+    # general date floor: combined with district and sex it is the classic
+    # re-identification triple.
+    description: "Patient date of birth in numeric or Turkish month-name form."
+    examples_synthetic:
+      - "12.03.1968"
+      - "3 Mart 1968 doğumlu"
+      - "1968-03-12"
+
+  - id: DATE_ADMISSION
+    hipaa_category: "All elements of dates (except year)"
+    identifier_class: direct
+    detector: ner
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.97
+    description: "Date of admission, hospitalisation or service encounter."
+    examples_synthetic:
+      - "yatış tarihi 04.11.2025"
+      - "14 Kasım 2025'te başvurdu"
+
+  - id: DATE_DISCHARGE
+    hipaa_category: "All elements of dates (except year)"
+    identifier_class: direct
+    detector: ner
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.97
+    description: "Date of discharge or end of an episode of care."
+    examples_synthetic:
+      - "taburcu: 09.11.2025"
+      - "21 Kasım 2025'te taburcu edildi"
+
+  - id: DATE_DEATH
+    hipaa_category: "All elements of dates (except year)"
+    identifier_class: direct
+    detector: ner
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.97
+    description: "Date of death (exitus) recorded in the note."
+    examples_synthetic:
+      - "exitus 17.12.2025"
+      - "vefat tarihi: 2 Ocak 2026"
+
+  - id: AGE_OVER_89
+    hipaa_category: "Ages over 89 and aggregate ages over 89"
+    identifier_class: direct
+    detector: ner
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.97
+    description: "Any age above 89, or a birth year implying one, which Safe Harbor treats as identifying because the cohort is tiny."
+    examples_synthetic:
+      - "94 yaşında kadın hasta"
+      - "doksan üç yaşındaki hasta"
+      - "91 yaşında, bilinen HT öyküsü"
+
+  - id: ADDRESS_STREET
+    hipaa_category: "Geographic subdivisions smaller than a state (street address)"
+    identifier_class: direct
+    detector: ner
+    tr_specific: true
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Turkish street-level address component: Mah., Sok., Cad., Bulv., No, Daire, Kat, Blok, Sitesi."
+    examples_synthetic:
+      - "Çiçek Mah. Menekşe Sok. No: 12 Daire: 4"
+      - "Yeşiltepe Cad. No 7, Kat 3"
+      - "Papatya Sitesi B Blok, Daire 11"
+
+  - id: ADDRESS_CITY
+    hipaa_category: "Geographic subdivisions smaller than a state (city)"
+    identifier_class: direct
+    detector: ner
+    tr_specific: true
+    checksum_validatable: false
+    recall_threshold: 0.95
+    # City alone is weakly identifying in a country of 85 million and is the
+    # entity most often mentioned for legitimate clinical reasons (referring
+    # centre, endemic exposure), so the floor sits at the bottom of the band.
+    description: "Turkish province or city (il) given as part of a patient address or place of residence."
+    examples_synthetic:
+      - "Eskişehir'de ikamet ediyor"
+      - "Kayseri"
+      - "Trabzon'dan sevk edildi"
+
+  - id: ADDRESS_DISTRICT
+    hipaa_category: "Geographic subdivisions smaller than a state (district)"
+    identifier_class: direct
+    detector: ner
+    tr_specific: true
+    checksum_validatable: false
+    recall_threshold: 0.96
+    description: "Turkish district or neighbourhood (ilçe, mahalle) narrowing residence below city level."
+    examples_synthetic:
+      - "Odunpazarı ilçesi"
+      - "Karşıyaka'da oturuyor"
+      - "Gülbahçe Mahallesi"
+
+  - id: POSTAL_CODE
+    hipaa_category: "ZIP codes"
+    identifier_class: direct
+    detector: rules
+    tr_specific: true
+    checksum_validatable: false
+    recall_threshold: 0.97
+    description: "Turkish five-digit postal code (posta kodu)."
+    examples_synthetic:
+      - "26000"
+      - "posta kodu: 34000"
+
+  - id: FACILITY_NAME
+    hipaa_category: "Names"
+    identifier_class: direct
+    detector: ner
+    tr_specific: true
+    checksum_validatable: false
+    recall_threshold: 0.96
+    # Facility names are named entities that shrink the candidate population
+    # sharply, but a note without any care-setting reference is close to
+    # clinically useless, so the floor is below the NAME class.
+    description: "Name of a hospital, clinic, department or other care facility."
+    examples_synthetic:
+      - "Örnek Üniversitesi Tıp Fakültesi Hastanesi"
+      - "Yeşilova Devlet Hastanesi"
+      - "Papatya Özel Tıp Merkezi"
+
+  - id: DEVICE_ID
+    hipaa_category: "Device identifiers and serial numbers"
+    identifier_class: direct
+    detector: rules
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Serial or identifier of an implanted or assigned medical device (pacemaker, pump, prosthesis)."
+    examples_synthetic:
+      - "pacemaker seri no: PM-0000-4312"
+      - "pompa SN 00A431X"
+
+  - id: LICENSE_PLATE
+    hipaa_category: "Vehicle identifiers and serial numbers"
+    identifier_class: direct
+    detector: rules
+    tr_specific: true
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Turkish vehicle plate: two-digit province code, one to three letters, two to four digits."
+    examples_synthetic:
+      - "26 ABC 00"
+      - "34 XY 0043"
+      - "06 A 0001"
+
+  - id: VEHICLE_ID
+    hipaa_category: "Vehicle identifiers and serial numbers"
+    identifier_class: direct
+    detector: rules
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Vehicle identification number or chassis number appearing in a trauma or forensic note."
+    examples_synthetic:
+      - "şasi no: 00XX00000A0000431"
+      - "VIN 0AAAAA0A0AA000431"
+
+  - id: BIOMETRIC_ID
+    hipaa_category: "Biometric identifiers"
+    identifier_class: direct
+    detector: rules
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Reference to a stored biometric template or its identifier: fingerprint, retina, voiceprint, genomic sample id."
+    examples_synthetic:
+      - "parmak izi kaydı: BIO-0000431"
+      - "biyometrik örnek no BM-884-21"
+
+  - id: HEALTH_PLAN_ID
+    hipaa_category: "Health plan beneficiary numbers"
+    identifier_class: direct
+    detector: rules
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Private health insurance policy or beneficiary number, distinct from the state SGK number."
+    examples_synthetic:
+      - "poliçe no: 000-4312-88"
+      - "sigorta üye no OZ0000431"
+
+  - id: ACCOUNT_NO
+    hipaa_category: "Account numbers"
+    identifier_class: direct
+    detector: rules
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Bank, billing or hospital financial account number that is not an IBAN."
+    examples_synthetic:
+      - "hesap no: 0000431-50"
+      - "fatura hesabı 884-0000431"
+
+  - id: CERTIFICATE_NO
+    hipaa_category: "Certificate/license numbers"
+    identifier_class: direct
+    detector: rules
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    description: "Certificate or licence number: driving licence, disability report number, professional registration."
+    examples_synthetic:
+      - "ehliyet no: 000431288"
+      - "engelli raporu no: 2026/000431"
+
+  - id: PHOTO_REF
+    hipaa_category: "Full-face photographs and comparable images"
+    identifier_class: direct
+    detector: ner
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.96
+    # This label covers the textual REFERENCE to an image inside a note; the
+    # image pixels themselves are out of scope for a text pipeline and that
+    # limitation is stated on every model card.
+    description: "Textual reference to a full-face photograph or comparable image, including its filename or archive id."
+    examples_synthetic:
+      - "yüz fotoğrafı ektedir (foto_0000431.jpg)"
+      - "hasta fotoğrafı arşiv no FT-884"
+
+  - id: OTHER_UNIQUE_ID
+    hipaa_category: "Any other unique identifying number, characteristic, or code"
+    identifier_class: direct
+    detector: rules
+    tr_specific: false
+    checksum_validatable: false
+    recall_threshold: 0.98
+    # Safe Harbor's catch-all category. It exists so an annotator is never
+    # forced to leave an identifying code unlabelled because no specific label
+    # fits; an unlabelled identifier is an unmeasured breach.
+    description: "Catch-all for any other unique identifying number or code not covered by a more specific label."
+    examples_synthetic:
+      - "çalışma katılımcı kodu: TRQ-0000431"
+      - "randevu kodu 8842-0043"
+
+# =============================================================================
+# CLASS B - CONTEXTUAL QUASI-IDENTIFIERS (Expert Determination tier, L3).
+#
+# WHY THERE IS NO recall_threshold AND NO precision_threshold HERE:
+# these are not entities, they are MEANINGS. "Merkez Bankası'nda çalışıyor" is
+# not a span type an annotator can enumerate exhaustively, so there is no
+# denominator to compute recall against, and any per-entity F1 we published
+# would be a number about our annotation habits rather than about privacy.
+# Two annotators will legitimately disagree on whether a given phrase is
+# re-identifying, because that depends on the population, not on the text.
+#
+# THEIR GATE IS ELSEWHERE: the contextual re-ID rate produced by the L6
+# adversarial red team, `contextual.reid_rate_max` in eval/thresholds.yaml
+# (<= 0.05). An attack that succeeds is the only evidence that a quasi-
+# identifier was missed. Reporting an F1 for these labels is forbidden; the
+# eval harness reports direct-identifier recall, medical-term FP rate and
+# contextual re-ID rate as three separate numbers and never blends them.
+# =============================================================================
+quasi_identifiers:
+
+  - id: EMPLOYER_ROLE
+    identifier_class: quasi
+    detector: llm
+    validated_by: reid_red_team
+    scored_by_f1: false
+    tr_specific: false
+    description: "Employer, occupation or institutional role that narrows the candidate population, especially when the employer is small or prestigious."
+    examples_synthetic:
+      - "Merkez Bankası'nda çalışıyor"
+      - "ilçedeki tek veterinerlik muayenehanesini işletiyor"
+      - "emekli deniz kuvvetleri subayı"
+      - "belediyede zabıta memuru olarak görev yapıyor"
+
+  - id: RELATIONSHIP_REF
+    identifier_class: quasi
+    detector: llm
+    validated_by: reid_red_team
+    scored_by_f1: false
+    tr_specific: false
+    description: "Reference to a relative or associate described by a distinguishing role rather than by name; carries no name token yet identifies the patient through that person."
+    examples_synthetic:
+      - "eşi tanınmış bir hâkim"
+      - "aynı bölümde hemşire olan kızı"
+      - "oğlu bu hastanede asistan doktor"
+      - "kardeşi geçen yıl aynı serviste yatmıştı"
+
+  - id: ASSET_LOCATION
+    identifier_class: quasi
+    detector: llm
+    validated_by: reid_red_team
+    scored_by_f1: false
+    tr_specific: false
+    description: "Property, asset or recurring geographic tie that locates the patient socially or economically without being a postal address."
+    examples_synthetic:
+      - "Dubai'de bir yazlık evleri var"
+      - "köyde iki yüz dönümlük fındık bahçesi işletiyor"
+      - "kışları Antalya'daki dairesinde kalıyor"
+
+  - id: DISTINCTIVE_EVENT
+    identifier_class: quasi
+    detector: llm
+    validated_by: reid_red_team
+    scored_by_f1: false
+    tr_specific: false
+    description: "A publicly reported or locally memorable event tying the patient to a news story, accident, disaster or ceremony."
+    examples_synthetic:
+      - "geçen ay haberlere konu olan fabrika yangınında yaralandı"
+      - "şehirdeki maraton yarışında kolapsı sonrası getirildi"
+      - "depremde enkazdan çıkarılan tek hasta olarak takip edildi"
+
+  - id: RARE_ATTRIBUTE_COMBO
+    identifier_class: quasi
+    detector: llm
+    validated_by: reid_red_team
+    scored_by_f1: false
+    tr_specific: false
+    description: "A combination of individually innocuous attributes whose intersection is unique in the source population; only detectable by reasoning over the whole document."
+    examples_synthetic:
+      - "94 yaşında, ülkedeki üçüncü vaka olarak bildirilen nadir metabolik hastalık"
+      - "ikiz gebelik, üçüncü nakil adayı, aynı ailede iki benzer olgu"
+      - "bölgede bu tanıyı alan tek pediatrik hasta"
+
+# =============================================================================
+# CLASS C - MEDICAL-TERM ALLOWLIST (the NEGATIVE set).
+#
+# Latin/English medical vocabulary that must NEVER be masked. Masking
+# `carcinoma` destroys the note. These entries are metadata only: the term
+# lists themselves live in eval/allowlist/*.txt so they can grow to thousands
+# of lines without touching the label vocabulary. Scored as a false-positive
+# rate (`medical_terms.fp_rate_max` <= 0.005), never as recall.
+#
+# `code_switch_suffixed: true` means the matcher must accept the Turkish
+# morphology applied to a Latin/English root - `carcinoma'lı`, `MRI'da`,
+# `PET-CT'de`, `metformin'e` - including apostrophe-less surface forms and
+# vowel-harmony variants of the same suffix.
+#
+# KNOWN OPEN ISSUE (allowlist vs recall precedence gap; ADR D-010, L4/M4):
+# an allowlist term can also be a real Turkish surname or given name - `Deva`
+# is both a given name and a pharma brand, `Costa` is both Latin for rib and a
+# common surname. L4 currently treats an allowlist hit as a deterministic
+# `Keep`, which means a single-model NAME span colliding with an allowlist
+# entry is silently suppressed and the name leaks. That is recall losing to
+# precision, which invariant I2 forbids. Resolution is context-sensitive
+# allowlisting: title/casing/position evidence overrides the allowlist, and
+# collisions escalate to the L4 adjudicator instead of short-circuiting.
+# Tracked as ADR D-010; until it lands, collisions are counted and reported.
+# =============================================================================
+allowlist_categories:
+
+  - id: DIAGNOSIS
+    identifier_class: allowlist
+    must_never_mask: true
+    source_file: "eval/allowlist/diagnosis.txt"
+    code_switch_suffixed: true
+    description: "Latin/English disease and diagnosis terms appearing verbatim in Turkish notes."
+    examples_synthetic:
+      - "carcinoma"
+      - "pneumonia"
+      - "diabetes mellitus"
+      - "carcinoma'lı hasta"
+
+  - id: ANATOMY
+    identifier_class: allowlist
+    must_never_mask: true
+    source_file: "eval/allowlist/anatomy.txt"
+    code_switch_suffixed: true
+    description: "Latin anatomical terms, including laterality and possessive forms."
+    examples_synthetic:
+      - "hepaticus"
+      - "sinistra"
+      - "costa"
+      - "arteria femoralis'te"
+
+  - id: DRUG
+    identifier_class: allowlist
+    must_never_mask: true
+    source_file: "eval/allowlist/drug.txt"
+    code_switch_suffixed: true
+    description: "Generic and brand drug names; brand names are the highest-risk collision class because they look like person names."
+    examples_synthetic:
+      - "metformin"
+      - "Adalat"
+      - "Deva"
+      - "metformin'e geçildi"
+
+  - id: ABBREVIATION
+    identifier_class: allowlist
+    must_never_mask: true
+    source_file: "eval/allowlist/abbreviation.txt"
+    code_switch_suffixed: true
+    description: "Standard English/Latin clinical abbreviations, which take Turkish case suffixes after an apostrophe."
+    examples_synthetic:
+      - "MRI"
+      - "PET-CT"
+      - "ECG"
+      - "MRI'da"
+
+  - id: PROCEDURE
+    identifier_class: allowlist
+    must_never_mask: true
+    source_file: "eval/allowlist/procedure.txt"
+    code_switch_suffixed: true
+    description: "Surgical and interventional procedure names of Latin/English origin."
+    examples_synthetic:
+      - "cholecystectomy"
+      - "angioplasty"
+      - "biopsy"
+      - "kolonoskopi sonrası biopsy'de"
+
+  - id: LAB_ANALYTE
+    identifier_class: allowlist
+    must_never_mask: true
+    source_file: "eval/allowlist/lab_analyte.txt"
+    code_switch_suffixed: true
+    description: "Laboratory analyte names and their abbreviations, which are frequently short uppercase tokens that confuse a name detector."
+    examples_synthetic:
+      - "hemoglobin"
+      - "creatinine"
+      - "CRP"
+      - "HbA1c"
+
+  - id: MICROORGANISM
+    identifier_class: allowlist
+    must_never_mask: true
+    source_file: "eval/allowlist/microorganism.txt"
+    code_switch_suffixed: true
+    description: "Binomial microorganism names; the capitalised genus is the classic false-positive trigger for a name detector."
+    examples_synthetic:
+      - "Escherichia coli"
+      - "Klebsiella pneumoniae"
+      - "Candida albicans"
+      - "Staphylococcus aureus'a"
+
+  # WHY a category of its own: bedside equipment vocabulary had no home, so
+  # `lead`, `monitör`, `sensör` and `walker` sat annotated in fixtures with no
+  # counterpart in any term file - L4 had no runtime reference for any of them.
+  # They are also the highest-collision class after brand names: `lead`, `Monitor`
+  # and `Walker` are all English surnames.
+  - id: DEVICE
+    identifier_class: allowlist
+    must_never_mask: true
+    source_file: "eval/allowlist/device.txt"
+    code_switch_suffixed: true
+    description: "Medical device, monitoring and mobility-aid vocabulary, including the Turkish-spelled loanwords used at the bedside."
+    examples_synthetic:
+      - "monitör"
+      - "sensör"
+      - "walker"
+      - "monitörde takip edildi"
+
+  # Declared as its own category rather than left implicit: eval/allowlist/
+  # code_switched.txt existed on disk with no schema entry pointing at it, which
+  # is how a term file becomes unreachable data. The loader now fails when a
+  # file is declared but missing, and equally when a file exists that no
+  # category declares - drift in either direction is a hard error.
+  - id: CODE_SWITCHED
+    identifier_class: allowlist
+    must_never_mask: true
+    source_file: "eval/allowlist/code_switched.txt"
+    code_switch_suffixed: true
+    description: "Cross-cutting surface forms: any allowlist root carrying Turkish inflectional morphology, listed per vowel-harmony variant."
+    examples_synthetic:
+      - "carcinoma'lı"
+      - "MRI'da"
+      - "PET-CT'de"
+      - "metformin'e"

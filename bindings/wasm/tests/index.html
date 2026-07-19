@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>deid-tr - browser panel (offline proof)</title>
+    <!--
+      NOTHING IS LOADED FROM A NETWORK ORIGIN, and that is the point of this
+      page rather than a stylistic preference. No CDN stylesheet, no web font,
+      no analytics tag, no favicon fetch. Every byte comes from the same
+      directory as this file. Open devtools, switch to the Network tab, reload:
+      you should see this document, the wasm-bindgen glue, and the .wasm module.
+      Nothing else, ever, no matter what you paste into the box.
+
+      A CSP is declared as a second, enforced line of defence, so that a future
+      edit which adds a tracking pixel or a font is blocked by the browser
+      rather than merely disapproved of in review. `connect-src 'none'` is the
+      load-bearing directive: it forbids fetch, XHR, WebSocket, EventSource and
+      sendBeacon outright.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <style>
+      body {
+        font: 15px/1.5 system-ui, sans-serif;
+        margin: 0 auto;
+        max-width: 46rem;
+        padding: 2rem 1rem;
+      }
+      textarea,
+      pre {
+        box-sizing: border-box;
+        width: 100%;
+        font: 13px/1.5 ui-monospace, monospace;
+      }
+      textarea {
+        height: 8rem;
+        padding: 0.5rem;
+      }
+      pre {
+        background: #f4f4f4;
+        overflow-x: auto;
+        padding: 0.75rem;
+        white-space: pre-wrap;
+      }
+      table {
+        border-collapse: collapse;
+        font-size: 13px;
+        width: 100%;
+      }
+      th,
+      td {
+        border-bottom: 1px solid #ddd;
+        padding: 0.25rem 0.5rem;
+        text-align: left;
+      }
+      .verdict {
+        font-weight: 600;
+        padding: 0.5rem 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>deid-tr browser panel</h1>
+    <p>
+      Safe Harbor runs entirely in this tab: L1 rules, span algebra, L4 routing
+      and L5 surrogates are compiled to WebAssembly from the same Rust the CLI
+      runs. L2 needs <code>onnxruntime-web</code> and L3 needs a WebGPU-hosted
+      local model; neither is bundled here, so this page is the Safe Harbor
+      tier only and says so rather than pretending otherwise.
+    </p>
+
+    <label for="note"><strong>Clinical note</strong> (synthetic only)</label>
+    <textarea id="note" spellcheck="false"></textarea>
+    <p>
+      <button id="run" type="button">De-identify</button>
+      <button id="restore" type="button" disabled>Restore original</button>
+    </p>
+
+    <h2>Output</h2>
+    <pre id="output"></pre>
+
+    <h2>Span map</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>bytes</th>
+          <th>label</th>
+          <th>layer</th>
+          <th>decision</th>
+          <th>checksum</th>
+          <th>replacement</th>
+        </tr>
+      </thead>
+      <tbody id="spans"></tbody>
+    </table>
+
+    <h2>Network</h2>
+    <p class="verdict" id="verdict">not run yet</p>
+
+    <script type="module">
+      // Booby-trap every networking global BEFORE the module loads, so a call
+      // from anywhere -- our code, the glue, a future dependency -- is recorded
+      // rather than merely forbidden by the CSP. The CSP blocks; this counts.
+      const fired = [];
+      for (const name of [
+        "fetch",
+        "XMLHttpRequest",
+        "WebSocket",
+        "EventSource",
+        "WebTransport",
+        "RTCPeerConnection",
+      ]) {
+        globalThis[name] = function trapped() {
+          fired.push(name);
+          throw new Error(`${name} was called`);
+        };
+      }
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon = () => {
+          fired.push("navigator.sendBeacon");
+          return false;
+        };
+      }
+
+      // `../pkg-web/` is the `wasm-pack build --target web` output. A relative
+      // path, same origin, no CDN.
+      const wasm = await import("../pkg-web/deid_tr_wasm.js");
+      await wasm.default();
+
+      // A checksum-valid TCKN, COMPUTED rather than written into this file (I8).
+      const stem = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+      const odd = stem.filter((_, i) => i % 2 === 0).reduce((a, b) => a + b, 0);
+      const even = stem.filter((_, i) => i % 2 === 1).reduce((a, b) => a + b, 0);
+      const tenth = (odd * 7 + 100 - even) % 10;
+      const eleventh = [...stem, tenth].reduce((a, b) => a + b, 0) % 10;
+      const tckn = [...stem, tenth, eleventh].join("");
+
+      const note = document.getElementById("note");
+      note.value = `Hasta Ayşe Yılmaz, TCKN ${tckn}, tel 0(532) 000 00 00.\nOp. Dr. Şükrü Gökçe tarafından görüldü; carcinoma'lı lezyon, MRI'da izlendi.`;
+
+      const output = document.getElementById("output");
+      const spans = document.getElementById("spans");
+      const verdict = document.getElementById("verdict");
+      const restore = document.getElementById("restore");
+      let last = null;
+
+      function report() {
+        verdict.textContent =
+          fired.length === 0
+            ? `no network call was made (${wasm.version()}). Check the Network tab: this document, the glue and the .wasm module, nothing else.`
+            : `FAILED: ${fired.join(", ")}`;
+      }
+
+      document.getElementById("run").addEventListener("click", () => {
+        spans.replaceChildren();
+        try {
+          // The tier is passed explicitly at every call. There is no default,
+          // because both defaults are wrong in a different direction.
+          //
+          // The salt is the page's job: the wasm module links neither js-sys
+          // nor web-sys (that is what keeps `fetch` out of its import table),
+          // so it cannot reach crypto.getRandomValues itself. A fresh one per
+          // run is SaltScope::Document -- two runs are not linkable.
+          const salt = new Uint8Array(32);
+          crypto.getRandomValues(salt);
+          last = wasm.deidentify(note.value, wasm.Tier.SafeHarbor, salt);
+        } catch (error) {
+          output.textContent = `error: ${error.message}`;
+          report();
+          return;
+        }
+        output.textContent = last.text;
+        restore.disabled = false;
+        for (let i = 0; i < last.spanCount; i += 1) {
+          const span = last.span(i);
+          const row = document.createElement("tr");
+          for (const cell of [
+            `${span.start}..${span.end}`,
+            span.label,
+            span.layer,
+            span.decision,
+            span.checksumValidated ? "yes" : "-",
+            span.replacement ?? "-",
+          ]) {
+            const td = document.createElement("td");
+            td.textContent = cell;
+            row.append(td);
+          }
+          spans.append(row);
+        }
+        report();
+      });
+
+      restore.addEventListener("click", () => {
+        if (!last) return;
+        // The round trip: the span map's OUTPUT offsets make this exact even
+        // when two identifiers share a replacement.
+        output.textContent = last.reidentify();
+        report();
+      });
+
+      report();
+    </script>
+  </body>
+</html>

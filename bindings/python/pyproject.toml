@@ -1,0 +1,74 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "deid-tr"
+description = "On-device de-identification of Turkish clinical text. Safe Harbor and Expert Determination tiers, byte-exact span map, no network."
+readme = false
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+# NO RUNTIME DEPENDENCIES, and this empty list is the load-bearing part of the
+# file rather than an omission. `pip install deid-tr` must not pull a HTTP
+# client, a telemetry SDK, a model hub client or a tokenizer that downloads
+# vocabularies on first use. Everything the package needs is compiled into the
+# extension, which is what makes "no network at import time" (I1) checkable by
+# reading one line instead of auditing a dependency tree.
+dependencies = []
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Healthcare Industry",
+  "License :: OSI Approved :: Apache Software License",
+  "Natural Language :: Turkish",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Rust",
+  "Topic :: Scientific/Engineering :: Medical Science Apps.",
+  "Typing :: Typed",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+# Test tooling only. Kept out of `dependencies` so a hospital install has the
+# smallest possible surface.
+dev = ["mypy>=1.11", "pytest>=8", "ruff>=0.6"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "deid_tr._deid_tr"
+# `extension-module` is what stops the build linking libpython, which is what
+# makes the wheel loadable by any interpreter that satisfies abi3.
+features = ["pyo3/extension-module"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+src = ["python", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "S", "A", "C4", "RET", "SIM", "PTH"]
+# S101 is `assert`. This is a test suite; asserting is the job.
+per-file-ignores = { "tests/*" = ["S101"] }
+
+[tool.mypy]
+strict = true
+python_version = "3.9"
+files = ["python", "tests"]
+# The extension is a compiled module with a hand-written stub beside it. Without
+# this, mypy resolves `deid_tr._deid_tr` to the .so when one has been built and
+# to nothing when one has not, so the checked API would silently differ between
+# a developer's machine and CI. Pointing it at the stub makes the stub the
+# contract, which is the only way `mypy --strict` can be meaningful before a
+# wheel exists.
+mypy_path = "python"
+
+# mypy analyses pytest's own sources while resolving the import, and pytest uses
+# `match` statements that are a syntax error under `python_version = "3.9"`. The
+# version pin is the point -- it is what proves this package's annotations work
+# on the oldest interpreter a hospital is likely to have -- so the third-party
+# tree is skipped rather than the pin being dropped.
+[[tool.mypy.overrides]]
+module = ["pytest.*"]
+follow_imports = "skip"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

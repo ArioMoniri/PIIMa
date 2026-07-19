@@ -1,0 +1,433 @@
+# Latin/English/Turkish disease and diagnosis terms
+#
+# Class C (medical-term allowlist) - the NEGATIVE set. Category: DIAGNOSIS
+# Declared in eval/schema.yaml as source_file: eval/allowlist/diagnosis.txt
+#
+# Terms here must NEVER be masked. Scored as a false-positive rate
+# (medical_terms.fp_rate_max <= 0.005), never as recall.
+#
+# Format: one term per line, UTF-8, sorted by Unicode code point, '#' comments.
+# Matching is case-insensitive and must also accept the Turkish suffixed forms
+# in code_switched.txt. APPEND-ONLY: never delete a term to make a build green.
+
+Addison
+Addison hastaligi
+Addison hastalığı
+Alport sendromu
+Alzheimer
+Alzheimer hastaligi
+Alzheimer hastalığı
+Barrett özofagusu
+Basedow
+Basedow hastalığı
+Behcet
+Behcet hastaligi
+Behçet
+Behçet hastalığı
+Bell
+Bell felci
+Bell paralizisi
+Berger hastalığı
+Budd-Chiari sendromu
+Buerger
+Buerger hastalığı
+Charcot-Marie-Tooth hastalığı
+Cheyne-Stokes
+Conn sendromu
+Creutzfeldt-Jakob
+Creutzfeldt-Jakob hastalığı
+Crohn
+Crohn hastaligi
+Crohn hastalığı
+Crohn's disease
+Cushing
+Cushing hastalığı
+Cushing sendromu
+De Quervain tenosinoviti
+Down
+Down sendromu
+Duchenne
+Duchenne musküler distrofisi
+Dumping
+Dupuytren kontraktürü
+Ehlers-Danlos sendromu
+Fanconi anemisi
+Felty sendromu
+Feokromositoma
+Gaucher hastalığı
+Gilbert sendromu
+Goodpasture sendromu
+Graves
+Graves hastalığı
+Guillain-Barre
+Guillain-Barre sendromu
+Guillain-Barré
+Guillain-Barré sendromu
+Hashimoto
+Hashimoto tiroiditi
+Henoch-Schönlein purpurası
+Hirschsprung hastalığı
+Hodgkin
+Hodgkin lenfoma
+Hodgkin lenfoması
+Horner sendromu
+Huntington hastalığı
+Janeway
+Kaposi sarkomu
+Kawasaki
+Kawasaki hastalığı
+Klinefelter
+Klinefelter sendromu
+Legg-Calve-Perthes hastalığı
+Ludwig anjini
+Mallory-Weiss sendromu
+Marfan
+Marfan sendromu
+Meckel divertikülü
+Meniere
+Meniere hastalığı
+Metaplasia
+Ménière
+Ménière hastalığı
+Osgood-Schlatter hastalığı
+Paget
+Paget hastalığı
+Parkinson
+Parkinson hastaligi
+Parkinson hastalığı
+Peutz-Jeghers sendromu
+Pott hastalığı
+Prinzmetal anjina
+Ramsay Hunt sendromu
+Raynaud
+Raynaud fenomeni
+Raynaud sendromu
+Reiter sendromu
+Sheehan sendromu
+Sjogren
+Sjogren sendromu
+Sjögren
+Sjögren sendromu
+Still hastalığı
+Sturge-Weber sendromu
+Takayasu
+Takayasu arteriti
+Tetanoz
+Tietze sendromu
+Tourette sendromu
+Turner
+Turner sendromu
+Waldenström makroglobulinemisi
+Wegener
+Wegener granülomatozu
+Whipple hastalığı
+Wilson
+Wilson hastaligi
+Wilson hastalığı
+Wolff-Parkinson-White sendromu
+Zollinger-Ellison sendromu
+acromegaly
+acute appendicitis
+acute decompensated heart failure
+acute kidney injury
+acute lymphoblastic leukemia
+acute pulmonary edema
+adenocarcinoma
+adenom
+adenoma
+akciğer kanseri
+alerji
+ameloblastoma
+amfizematöz
+amiloidoz
+anemi
+anemia
+aneurysma
+angina pectoris
+ankilozan spondilit
+anorexia nervosa
+anxietas
+apandisit
+appendicitis
+arrhythmia
+arthritis
+ascites
+asit
+aspirasyon
+asthma
+astım
+atelectasis
+atelektazi
+atherosclerosis
+atrial fibrilasyon
+atrial fibrillation
+atriyal fibrilasyon
+atrofi
+atrophia
+bacteremia
+basalioma
+bel fıtığı
+bipolar affective disorder
+bipolar disorder
+bradycardia
+bronchiolitis
+bronchitis
+bronchopneumonia
+bronşit
+brucellosis
+bruselloz
+böbrek taşı
+böbrek yetmezliği
+cachexia
+candidiasis
+carcinoma
+carcinoma in situ
+cardiogenic shock
+cataract
+cataracta
+cellulitis
+cholangitis
+cholecystitis
+cholelithiasis
+cholestasis
+chronic kidney disease
+cirrhosis
+colitis
+community acquired pneumonia
+conjunctivitis
+contusio
+cystitis
+delirium
+dementia
+depressio
+dermatitis
+diabetes insipidus
+diabetes mellitus
+diabetic foot ulcer
+diabetic ketoacidosis
+diabetic nephropathy
+diabetic polyneuropathy
+diabetic retinopathy
+diffuse large B-cell lymphoma
+dislipidemi
+dispne
+diyabet
+ductal adenocarcinoma
+dysplasia
+dyspnoea
+eclampsia
+edema
+embolia
+embryonal carcinoma
+emfizem
+emphysema
+encephalitis
+endocarditis
+endometriosis
+enfeksiyon
+epilepsi
+epilepsia
+epilepsy
+esophagitis
+familial hypocalciuric hypercalcemia
+fibroma
+fibrosis
+flebit
+fractura
+fraktür
+gastrit
+gastritis
+gastroesophageal reflux
+gestational diabetes mellitus
+glaucoma
+glioblastoma
+glomerulonephritis
+goiter
+gout
+guatr
+hemangioma
+hematom
+hemorrhagia
+hemotoraks
+hepatitis
+hepatocellular carcinoma
+hernia
+hernia hiatalis
+hernia inguinalis
+hidronefroz
+high-grade ürotelyal carcinoma
+hiperkalsemi
+hiperlipidemi
+hipertansiyon
+hipertiroidi
+hipertrofi
+hipoekoik
+hipoglisemi
+hipointens
+hipokinezi
+hiponatremi
+hipotiroidi
+hydronephrosis
+hyperlipidemia
+hyperplasia
+hypertension
+hyperthyroidism
+hypertrophia
+hypotension
+hypothyroidism
+icterus
+ileus
+infarctus
+infarkt
+infective endocarditis
+infertilitas
+influenza
+inme
+invasive ductal carcinoma
+ischemia
+kabızlık
+kalp krizi
+kalp yetmezliği
+kanama
+kanser
+kemik erimesi
+ketonüri
+kireçlenme
+kolestaz
+kolon kanseri
+konsolidasyon
+kontrast nefropatisi
+koroner arter hastalığı
+laceratio
+laryngitis
+laserasyon
+lenfadenopati
+leukemia
+leukopenia
+lipohipertrofi
+lipoma
+lymphoma
+lökositoz
+major depression
+major depressive disorder
+makroadenom
+makroglossi
+malnutrition
+melanoma
+melanoma in situ
+meme kanseri
+meningioma
+meningitis
+metastasis
+metastatik
+metastaz
+mide kanseri
+migraine
+migren
+mikrokalsifikasyon
+mucositis
+multipl myeloma
+multiple sclerosis
+myeloma
+myocardial infarction
+myocarditis
+myoma uteri
+myopathia
+myxomatous
+necrosis
+neoplasma
+nephritis
+nephrolithiasis
+neuropathia
+neutropenia
+non-Hodgkin lenfoma
+obesity
+obezite
+osteoarthritis
+osteomyelit
+osteomyelitis
+osteoporosis
+osteoporoz
+osteosarcoma
+otitis media
+pancreatitis
+panic disorder
+parkinsonizm
+patent foramen ovale
+paterji
+penicillin allergy
+perforatio
+pericarditis
+peripheral artery disease
+peritoneal karsinomatozis
+pharyngitis
+pleuritis
+plevral efüzyon
+pneumonia
+pneumothorax
+pnömotoraks
+polikistik over sendromu
+preeclampsia
+primer hiperaldosteronizm
+primer hiperparatiroidizm
+prolapsus
+prostat kanseri
+prostatitis
+psoriasis
+pulmonary edema
+pulmonary embolism
+pulmonary fibrosis
+pyelonephritis
+radiculopathy
+radikülopati
+rebound
+reflü
+respiratory distress syndrome
+restenoz
+retinopathia
+rheumatoid arthritis
+rhinitis
+romatizma
+sara
+sarcoma
+sarkoidoz
+sarılık
+schizophrenia
+sclerosis
+scoliosis
+sepsis
+septicemia
+septik şok
+severe aortic stenosis
+sinusitis
+siroz
+solunum yetmezliği
+spondylosis
+squamous cell carcinoma
+steatosis
+stenosis
+supraventricular tachycardia
+syncope
+tachycardia
+tetanus
+thalassemia
+thrombocytopenia
+thrombosis
+thyroiditis
+tiroidit
+tirotoksikoz
+tonsillitis
+tuberculosis
+tümör
+ulcerative colitis
+ulcus
+ulcus pepticum
+urosepsis
+urticaria
+varicella
+verem
+vertigo
+zatürre
+ödem
+ülser
+üriner sistem enfeksiyonu

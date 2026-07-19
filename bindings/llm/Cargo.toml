@@ -1,0 +1,32 @@
+[package]
+name = "deid-tr-llm"
+description = "Local-only L3 contextual model runtime for deid-tr: GGUF via a local process, air-gap compatible."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# WHAT IS DELIBERATELY ABSENT FROM THIS LIST, and why it is worth a comment in a
+# manifest with one dependency.
+#
+# This crate is the L3 model runtime. It is the single place in the repository
+# where the temptation to "just call a hosted model" is strongest, because a
+# hosted model is better at the task than anything that fits on a laptop. It is
+# also the one place where doing so would be fatal: L3 reads the WHOLE clinical
+# note, so a remote call here uploads the entire document in order to be told
+# which parts of it were sensitive. That is a disclosure, not a
+# de-identification.
+#
+# BANNED, permanently, with no feature flag and no "offline mode" escape hatch:
+# every HTTP or RPC client (reqwest, ureq, hyper, tonic, isahc, surf, curl,
+# attohttpc, minreq, ehttp), every cloud inference SDK, and every telemetry or
+# crash-reporting crate. `scripts/hooks/guard_invariants.sh` refuses an edit
+# anywhere in this repository that names one, and it is not scoped to core/
+# precisely so that this directory cannot become the exception.
+#
+# The consequence is that this crate cannot fetch weights. That is intended:
+# weights arrive with the release artifact or through `deid pull --from ./bundle`
+# (I1), and a runtime that could download a model at inference time is a runtime
+# that can be pointed somewhere else.
+[dependencies]
+deid-tr-core = { path = "../../core" }

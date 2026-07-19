@@ -1,0 +1,141 @@
+# deid-tr release gates.
+#
+# ============================================================================
+# A THRESHOLD IN THIS FILE MAY ONLY EVER BE RAISED.
+#
+# Lowering one requires an entry in docs/DECISIONS.md and explicit human
+# approval in the session. If you want to lower a threshold, you have found a
+# bug, not a bad threshold.
+#
+# This file is write-protected by scripts/hooks/guard_invariants.sh. A commit
+# that decreases any number below, flips any enum to a weaker value, or
+# deletes an entry is rejected, not reviewed.
+# ============================================================================
+#
+# Every number here is a FLOOR (for rates that must be high) or a CEILING (for
+# rates that must be low). The eval harness asserts against this file; the
+# harness has no defaults of its own, so deleting a key does not relax a gate,
+# it fails the run.
+#
+# Reporting rule from the brief: direct-identifier recall, medical-term
+# false-positive rate and contextual re-ID rate are reported as THREE SEPARATE
+# NUMBERS. Never a blended score, never aggregate F1 alone.
+
+meta:
+  thresholds_version: "1.0.0"
+  schema_file: "eval/schema.yaml"
+  # Aggregate F1 is a summary, not a gate on its own; per-entity recall below
+  # is what actually blocks a release.
+  report_per_entity_recall: true
+
+direct_identifiers:
+  # The breach vectors. A missed name, ID or contact point re-identifies the
+  # patient on its own, so the HIPAA-critical classes carry the highest floor
+  # we can defend against a human-annotated gold set.
+  recall_direct_critical: 0.98
+
+  # Stubbs et al. 2015 (i2b2/UTHealth 2014 de-identification track) established
+  # 0.95 micro F1 as the accepted bar for a usable de-identification system;
+  # anything below it is not competitive with published English work.
+  micro_f1_direct: 0.95
+
+  # What a hospital compliance officer actually asks about: not spans, but
+  # documents. At most 2% of notes may contain one or more missed direct
+  # identifiers after masking.
+  document_leak_rate_max: 0.02
+
+  # A checksum-valid TCKN, VKN or TR IBAN cannot be a coincidence, so a
+  # checksum-gated match is never a false positive. Any value below 1.000 is a
+  # defect in the L1 rule or in its checksum implementation, never a tuning
+  # question.
+  checksum_id_precision: 1.000
+
+medical_terms:
+  # Masking `carcinoma` destroys the note. The allowlist is the negative set
+  # and this is its false-positive ceiling: at most 0.5% of legitimate
+  # Latin/English medical terms may be masked as PHI. Measured over the
+  # code-switched suffixed forms too (`carcinoma'lı`, `MRI'da`), because that
+  # is where token classifiers actually break.
+  fp_rate_max: 0.005
+
+contextual:
+  # The real success metric for L3, and the ONLY gate the class B quasi-
+  # identifiers have - they carry no per-entity recall or precision threshold
+  # because they are meanings, not enumerable entities. The L6 adversarial
+  # red team attempts re-identification against the masked output; at most 5%
+  # of documents may fall to any attack class (D-008).
+  reid_rate_max: 0.05
+
+robustness:
+  # RoBERTa on i2b2 drops to 0.887 F1 on nursing notes it never saw in
+  # training. Generalisation loss on an unseen note type is therefore expected
+  # and must be bounded rather than denied: recall may fall at most 5 points
+  # when the harness is run against a held-out note type.
+  sight_unseen_recall_drop_max: 0.05
+
+  # I6, the backbone/language gate. Not a float: the tokenizer either
+  # round-trips Turkish plus code-switched Latin/English medical terms with
+  # Turkish morphology applied, or the backbone does not ship. Permitted value
+  # is `lossless` and nothing else.
+  tokenizer_roundtrip: lossless
+
+invariants:
+  # I1, PHI never leaves the device. `core/` makes zero network syscalls during
+  # the test suite; `just test-airgapped` runs it with networking disabled so
+  # this is observed, not asserted on trust.
+  core_network_syscalls_max: 0
+
+  # I5, model cards are build artifacts. The `eval_sha` printed on a card must
+  # match a committed run in eval/results/ exactly - not a prefix, not a
+  # nearest run. Anything else means the published numbers came from a
+  # different evaluation than the one in the repo.
+  card_eval_sha_match: exact
+
+# Per-entity recall floors, mirroring `recall_threshold` in eval/schema.yaml.
+# The harness asserts recall PER ENTITY TYPE, not only aggregate F1, because a
+# 0.95 micro F1 can hide a 0.60 recall on TCKN behind a large, easy DATE class.
+# These values must stay identical to schema.yaml; scripts/hooks/
+# guard_invariants.sh fails the commit if they drift apart.
+per_entity_recall:
+  PATIENT_NAME: 0.98
+  CLINICIAN_NAME: 0.98
+  RELATIVE_NAME: 0.98
+  TCKN: 0.98
+  VKN: 0.98
+  SGK_NO: 0.98
+  MRN: 0.98
+  PASSPORT_NO: 0.98
+  IBAN: 0.98
+  PHONE: 0.98
+  EMAIL: 0.98
+  URL: 0.98
+  IP_ADDRESS: 0.98
+  DATE_BIRTH: 0.98
+  DATE_ADMISSION: 0.97
+  DATE_DISCHARGE: 0.97
+  DATE_DEATH: 0.97
+  AGE_OVER_89: 0.97
+  ADDRESS_STREET: 0.98
+  ADDRESS_CITY: 0.95
+  ADDRESS_DISTRICT: 0.96
+  POSTAL_CODE: 0.97
+  FACILITY_NAME: 0.96
+  DEVICE_ID: 0.98
+  LICENSE_PLATE: 0.98
+  VEHICLE_ID: 0.98
+  BIOMETRIC_ID: 0.98
+  HEALTH_PLAN_ID: 0.98
+  ACCOUNT_NO: 0.98
+  CERTIFICATE_NO: 0.98
+  PHOTO_REF: 0.96
+  OTHER_UNIQUE_ID: 0.98
+
+# Precision floors, only for entities whose match is checksum-gated. Every
+# other entity is deliberately absent: I2 says precision is a feature, and a
+# precision floor on a NER-detected label would create pressure to drop
+# borderline spans, which is the failure mode the whole project exists to
+# avoid.
+per_entity_precision:
+  TCKN: 1.000
+  VKN: 1.000
+  IBAN: 1.000

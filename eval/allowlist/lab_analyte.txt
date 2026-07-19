@@ -1,0 +1,164 @@
+# Laboratory analyte names and abbreviations
+#
+# Class C (medical-term allowlist) - the NEGATIVE set. Category: LAB_ANALYTE
+# Declared in eval/schema.yaml as source_file: eval/allowlist/lab_analyte.txt
+#
+# Terms here must NEVER be masked. Scored as a false-positive rate
+# (medical_terms.fp_rate_max <= 0.005), never as recall.
+#
+# Format: one term per line, UTF-8, sorted by Unicode code point, '#' comments.
+# Matching is case-insensitive and must also accept the Turkish suffixed forms
+# in code_switched.txt. APPEND-ONLY: never delete a term to make a build green.
+
+25-hydroxyvitamin D
+ACTH
+AFP
+B12
+C-peptide
+C-reactive protein
+CA 125
+CA 15-3
+CA 19-9
+CEA
+D-dimer
+HDL cholesterol
+HbA1c
+LDL cholesterol
+PSA
+Rose Bengal
+acil biyokimya
+activated partial thromboplastin time
+alanine aminotransferase
+albumin
+aldosteron
+aldosterone
+alkaline phosphatase
+ammonia
+amylase
+anti-TPO
+antibiyogram
+antithrombin III
+apolipoprotein B
+aspartate aminotransferase
+açlık kan şekeri
+base excess
+basophil
+beta-hCG
+beta-laktamaz
+bicarbonate
+bilirubin
+biochemistry
+biyokimya
+blood culture
+blood gas
+blood urea nitrogen
+brain natriuretic peptide
+böbrek fonksiyon testleri
+calcium
+chloride
+cholesterol
+cortisol
+creatine kinase
+creatine kinase-MB
+creatinine
+culture
+direct bilirubin
+ejeksiyon fraksiyonu
+eosinophil
+erythrocyte
+erythrocyte sedimentation rate
+estradiol
+fasting glucose
+ferritin
+fibrinogen
+folate
+follicle stimulating hormone
+free T3
+free T4
+gamma-glutamyl transferase
+globulin
+glucose
+glukoz
+growth hormone
+hematocrit
+hemoglobin
+hemogram
+homocysteine
+idrar tetkiki
+indirect bilirubin
+international normalized ratio
+ionized calcium
+iron
+kalsitonin
+kan gazı
+kan grubu
+kan şekeri
+karaciğer fonksiyon testleri
+koagülasyon testleri
+kolesterol
+kortizol
+kreatinin
+lactate
+lactate dehydrogenase
+laktat
+leukocyte
+lipase
+lipoprotein(a)
+luteinizing hormone
+lymphocyte
+lökosit
+magnesium
+metanefrin
+microalbuminuria
+monocyte
+myoglobin
+neutrophil
+osmolality
+pCO2
+pH
+pO2
+parathormon
+parathyroid hormone
+phosphorus
+platelet
+postprandial glucose
+procalcitonin
+progesterone
+prokalsitonin
+prolactin
+prolaktin
+protein C
+protein S
+prothrombin time
+renin
+reticulocyte
+sedimentasyon
+seruloplazmin
+sodium
+tam idrar tetkiki
+tam kan sayımı
+testosterone
+thrombocyte
+thyroglobulin
+thyroid stimulating hormone
+tiroid fonksiyon testleri
+total bilirubin
+total cholesterol
+total iron binding capacity
+total protein
+transferrin
+trigliserit
+triglyceride
+troponin
+troponin I
+troponin T
+urea
+uric acid
+urinalysis
+urine creatinine
+urine culture
+urine protein
+vitamin B12
+vitamin D
+üre
+ürik asit

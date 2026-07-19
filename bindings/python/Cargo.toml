@@ -1,0 +1,51 @@
+[package]
+name = "deid-tr-python"
+description = "PyO3 binding for deid-tr: tier-explicit de-identification of Turkish clinical text, on-device."
+# Literal, not `*.workspace = true`. This crate is deliberately EXCLUDED from the
+# workspace (see the block below), and an excluded crate has no workspace to
+# inherit from -- the inherited form failed at manifest parse, which meant the
+# binding could not be built at all, offline or online.
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/ArioMoniri/PIIMa"
+
+[lib]
+name = "_deid_tr"
+# `cdylib` only. There is no `rlib`, because nothing in this repository should
+# ever link the Python binding as a Rust library -- the logic lives in `core/`
+# and this crate is a translation layer.
+crate-type = ["cdylib"]
+
+# THIS CRATE IS EXCLUDED FROM THE WORKSPACE. See the `exclude` block in the root
+# Cargo.toml for why: `pyo3` is not in this machine's registry cache, so listing
+# it as a member forces a network resolve on every offline `cargo build` in the
+# repository, and `just test-airgapped` is a release gate.
+#
+# Consequence, stated plainly rather than discovered later: the Rust half of
+# this binding has NOT been compiled. The Python half (stubs, package, tests,
+# ruff, mypy --strict) is checked; the `pyo3` version below is the current
+# stable line and must be confirmed by whoever runs the first online
+# `cargo fetch -p deid-tr-python`.
+#
+# BANNED here, permanently, exactly as in core/: every HTTP or RPC client, every
+# cloud inference SDK, every telemetry or crash-reporting crate. A Python
+# process that imports this module must not acquire a socket by doing so, which
+# is what makes "no network at import time" (I1) a structural property rather
+# than a docstring.
+[dependencies]
+deid-tr-core = { path = "../../core" }
+
+# CSPRNG for the L5 salt, for the reason stated on `Pipeline::salt` in src/lib.rs:
+# `core/` performs no I/O (I1) so it cannot reach an entropy source, and a salt
+# it invented from a counter would be one an attacker can reconstruct. getrandom
+# is the OS syscall and nothing else -- no socket, no allocation, no global
+# state -- so it does not weaken the ban stated above.
+getrandom = "0.3"
+
+# `extension-module` is what stops the build linking libpython, which is what
+# makes the wheel portable. `abi3-py39` builds ONE wheel that every CPython from
+# 3.9 up loads: a hospital running a pinned 3.9 and a researcher on 3.13 install
+# the same audited artifact, and there is no per-version build whose provenance
+# somebody has to check separately.
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"] }

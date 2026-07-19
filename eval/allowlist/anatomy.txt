@@ -1,0 +1,278 @@
+# Latin anatomical terms, laterality and direction
+#
+# Class C (medical-term allowlist) - the NEGATIVE set. Category: ANATOMY
+# Declared in eval/schema.yaml as source_file: eval/allowlist/anatomy.txt
+#
+# Terms here must NEVER be masked. Scored as a false-positive rate
+# (medical_terms.fp_rate_max <= 0.005), never as recall.
+#
+# Format: one term per line, UTF-8, sorted by Unicode code point, '#' comments.
+# Matching is case-insensitive and must also accept the Turkish suffixed forms
+# in code_switched.txt. APPEND-ONLY: never delete a term to make a build green.
+
+Ductus cysticus
+Ductus hepaticus communis
+Mediasten
+abdomen
+abdominalis
+acetabulum
+akciğer
+aksiller
+alveolus
+anterior
+anterior cruciate ligament
+aorta
+aorta abdominalis
+apendiks
+appendix
+arachnoidea
+arteria
+arteria brachialis
+arteria carotis
+arteria coronaria
+arteria cystica
+arteria femoralis
+arteria femoralis communis
+arteria hepatica
+arteria hepatica dextra
+arteria iliaca
+arteria mesenterica
+arteria mesenterica superior
+arteria poplitea dextra
+arteria pulmonalis
+arteria radialis
+arteria renalis
+articulatio
+atardamar
+atrium
+axillaris
+bağırsak
+beyin
+beyincik
+biliaris
+boyun
+brachialis
+bronchus
+bursa
+böbrek
+caecum
+capillaris
+capsula
+cardiacus
+cartilago
+caudalis
+cerebellum
+cerebralis
+cerebrum
+cervicalis
+clavicula
+coccyx
+colon
+columna vertebralis
+communis
+cor
+coronarius
+corpus
+cortex
+costa
+costae
+cranialis
+cranium
+cutis
+dalak
+dens
+dermatom
+dexter
+dextra
+diaphragma
+distalis
+diş
+dorsalis
+duodenum
+dura mater
+eklem
+esophagus
+externus
+facialis
+fascia
+femoralis
+femur
+fibula
+frontalis
+ganglion
+gaster
+gastricus
+glandula
+glandula suprarenalis
+glandula thyroidea
+göz
+göğüs
+hepar
+hepaticus
+hippocampus
+humerus
+hypophysis
+hypothalamus
+ileum
+iliacus
+inferior
+inguinalis
+internus
+intestinum
+intraoküler
+jejunum
+jugularis
+kalp
+karaciğer
+karın
+kas
+kemik
+klavikula
+koledok
+kornea
+kulak
+larynx
+lateralis
+lien
+ligamentum
+lobus
+longus
+lumbalis
+mandibula
+maxilla
+medialis
+mediastinum
+medius
+medulla oblongata
+medulla ossium
+medulla spinalis
+meninges
+meniscus
+mesane
+mesentericus
+metacarpus
+metatarsus
+mitral
+musculus
+musculus biceps
+musculus deltoideus
+musculus gastrocnemius
+musculus pectoralis
+musculus psoas
+musculus quadriceps
+musculus soleus
+musculus trapezius
+musculus triceps
+nervus
+nervus facialis
+nervus ischiadicus
+nervus medianus
+nervus opticus
+nervus phrenicus
+nervus radialis
+nervus trigeminus
+nervus ulnaris
+nervus vagus
+occipitalis
+oesophagus
+omurga
+omurilik
+opticus
+orbita
+os
+os frontale
+os occipitale
+os parietale
+os sacrum
+os temporale
+ovarium
+pancreas
+pankreas
+parietalis
+patella
+pelvis
+pericardium
+periosteum
+peritoneum
+phalanx
+pharynx
+pia mater
+pleura
+plexus
+plexus brachialis
+posterior
+profundus
+prostat
+prostata
+proximalis
+pulmo
+pulmonalis
+radialis
+radius
+rahim
+ramus
+rectum
+rectus
+ren
+renalis
+retina
+sacralis
+safra kesesi
+sakrum
+scapula
+sinister
+sinistra
+sinus
+sinus frontalis
+sinus maxillaris
+spinalis
+sternum
+subkapital
+superficial femoral
+superficialis
+superior
+sırt
+temporalis
+tendo
+testis
+thalamus
+thoracalis
+thorax
+thymus
+thyroidea
+tibia
+tiroid bezi
+tonsilla
+toplardamar
+trachea
+transversus
+triküspit
+truncus
+ulna
+ulnaris
+ureter
+urethra
+urinarius
+uterus
+vena
+vena cava
+vena cava inferior
+vena cava superior
+vena femoralis
+vena femoralis dextra
+vena femoralis sinistra
+vena jugularis
+vena poplitea sinistra
+vena portae
+vena saphena
+vena saphena magna
+vena subclavia
+ventralis
+ventriculus
+vertebra
+vertebrae
+vesica biliaris
+vesica urinaria
+vesicula seminalis
+yolk sac
+yumurtalık

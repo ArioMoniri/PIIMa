@@ -1,0 +1,58 @@
+[package]
+name = "deid-tr-cli"
+description = "Native CLI for deid-tr: masking, model pull, and the opt-out auto-updater."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# WHY THE NETWORK DEPENDENCIES LIVE HERE AND ONLY HERE.
+#
+# `core/` is structurally incapable of sending PHI anywhere (I1), and the
+# pre-commit hook greps core/**/Cargo.toml for exactly the crate names below and
+# refuses the commit. This crate is the deliberate other side of that boundary:
+# the ONLY place in the repository allowed to open a socket. Nothing here may be
+# moved, re-exported, or feature-flagged into core/.
+#
+# What each network-capable dependency is for, so that a future reviewer can
+# tell an addition from a regression at a glance:
+#   reqwest         - one GET of a static release manifest, one GET of a release
+#                     artifact. Blocking, rustls only, no default features, so no
+#                     system TLS stack and no cookie/proxy/redirect surface we did
+#                     not ask for. The `json` feature is deliberately absent: the
+#                     manifest is parsed by our own key=value parser, which keeps
+#                     serde_json out and makes the wire format small enough to
+#                     read in full during review.
+#   minisign-verify - Ed25519 signature VERIFICATION only. It cannot sign, so a
+#                     release key cannot be created by this binary even in error.
+#   sha2            - the artifact checksum.
+#
+# NOT A DEPENDENCY, permanently: any telemetry, analytics, crash-reporting, or
+# metrics crate. See the module header of src/update.rs for the full ban list and
+# the reasoning. An addition here is reverted, not debated.
+[dependencies]
+deid-tr-core = { path = "../../core" }
+# CSPRNG for the L5 salt. `core/` cannot generate one -- it performs no I/O
+# (I1), so it has no route to an operating-system entropy source and a salt it
+# invented from a counter would be a salt an attacker can guess. Supplying the
+# key material is therefore the BINDING's job, and getrandom is the OS syscall
+# and nothing else: no socket, no allocation, no global state.
+getrandom = "0.3"
+minisign-verify = "0.2"
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "rustls-tls",
+] }
+sha2 = "0.10"
+thiserror = "2"
+
+# WHY minisign (the signing crate) is a DEV dependency and never a runtime one:
+# the tests must prove that a genuinely valid signature is accepted, which needs a
+# real signer. Shipping a signer in the release binary would put key generation
+# one call away from a tool that runs on hospital machines.
+[dev-dependencies]
+minisign = "0.7"
+
+[[bin]]
+name = "deid"
+path = "src/main.rs"

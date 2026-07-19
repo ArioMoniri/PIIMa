@@ -1,0 +1,145 @@
+# Binomial and genus-only microorganism names
+#
+# Class C (medical-term allowlist) - the NEGATIVE set. Category: MICROORGANISM
+# Declared in eval/schema.yaml as source_file: eval/allowlist/microorganism.txt
+#
+# Terms here must NEVER be masked. Scored as a false-positive rate
+# (medical_terms.fp_rate_max <= 0.005), never as recall.
+#
+# Format: one term per line, UTF-8, sorted by Unicode code point, '#' comments.
+# Matching is case-insensitive and must also accept the Turkish suffixed forms
+# in code_switched.txt. APPEND-ONLY: never delete a term to make a build green.
+
+Acinetobacter
+Acinetobacter baumannii
+Ascaris lumbricoides
+Aspergillus
+Aspergillus flavus
+Aspergillus fumigatus
+Bacillus
+Bacillus anthracis
+Bacillus cereus
+Bacteroides
+Bacteroides fragilis
+Bordetella pertussis
+Borrelia
+Borrelia burgdorferi
+Brucella
+Brucella abortus
+Brucella melitensis
+Burkholderia cepacia
+Campylobacter
+Campylobacter jejuni
+Candida
+Candida albicans
+Candida auris
+Candida glabrata
+Candida parapsilosis
+Candida tropicalis
+Chlamydia
+Chlamydia trachomatis
+Chlamydophila pneumoniae
+Citrobacter freundii
+Clostridioides difficile
+Clostridium
+Clostridium botulinum
+Clostridium difficile
+Clostridium perfringens
+Clostridium tetani
+Corynebacterium
+Corynebacterium diphtheriae
+Coxiella burnetii
+Cryptococcus
+Cryptococcus neoformans
+Echinococcus granulosus
+Entamoeba
+Entamoeba histolytica
+Enterobacter
+Enterobacter cloacae
+Enterobius vermicularis
+Enterococcus
+Enterococcus faecalis
+Enterococcus faecium
+Epstein-Barr virus
+Escherichia
+Escherichia coli
+Francisella tularensis
+Giardia
+Giardia lamblia
+Haemophilus
+Haemophilus influenzae
+Helicobacter
+Helicobacter pylori
+Histoplasma capsulatum
+Klebsiella
+Klebsiella oxytoca
+Klebsiella pneumoniae
+Legionella
+Legionella pneumophila
+Leishmania
+Leishmania infantum
+Leptospira interrogans
+Listeria
+Listeria monocytogenes
+Malassezia furfur
+Moraxella catarrhalis
+Morganella morganii
+Mycobacterium
+Mycobacterium avium
+Mycobacterium leprae
+Mycobacterium tuberculosis
+Mycoplasma
+Mycoplasma pneumoniae
+Neisseria
+Neisseria gonorrhoeae
+Neisseria meningitidis
+Plasmodium
+Plasmodium falciparum
+Plasmodium vivax
+Pneumocystis jirovecii
+Proteus
+Proteus mirabilis
+Proteus vulgaris
+Pseudomonas
+Pseudomonas aeruginosa
+Rickettsia conorii
+SARS-CoV-2
+Salmonella
+Salmonella enteritidis
+Salmonella typhi
+Sarcoptes scabiei
+Serratia
+Serratia marcescens
+Shigella
+Shigella flexneri
+Shigella sonnei
+Staphylococcus
+Staphylococcus aureus
+Staphylococcus epidermidis
+Staphylococcus saprophyticus
+Stenotrophomonas maltophilia
+Streptococcus
+Streptococcus agalactiae
+Streptococcus mitis
+Streptococcus pneumoniae
+Streptococcus pyogenes
+Streptococcus viridans
+Taenia saginata
+Toxoplasma
+Toxoplasma gondii
+Treponema
+Treponema pallidum
+Trichomonas vaginalis
+Trichophyton rubrum
+Vibrio cholerae
+Yersinia enterocolitica
+adenovirus
+cytomegalovirus
+hepatitis B virus
+hepatitis C virus
+herpes simplex virus
+influenza virus
+norovirus
+respiratory syncytial virus
+rotavirus
+varicella zoster virus

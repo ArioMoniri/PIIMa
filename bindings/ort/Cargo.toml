@@ -1,0 +1,61 @@
+[package]
+name = "deid-tr-ort"
+description = "Native ONNX Runtime implementation of deid-tr's L2 Detector seam, with automatic execution-provider selection."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# WHY THIS CRATE EXISTS AT ALL.
+#
+# `core/` defines the `Detector` trait and does the decode, the alignment and
+# the merge, all pure (I1: no I/O, no network, compiles to wasm32). The forward
+# pass is the ONLY part of L2 that cannot be single-sourced across targets,
+# because `ort` dropped `wasm32-unknown-unknown` support. So the runtime lives
+# here and nowhere else. Adding `ort` -- or any inference runtime -- to
+# core/Cargo.toml violates I1 and the pre-commit guard blocks the manifest edit.
+#
+# THE `ort` DEPENDENCY IS NOT DECLARED YET, AND THAT IS DELIBERATE, NOT AN
+# OVERSIGHT. Two reasons, both about the no-download rule:
+#
+#   1. `ort`'s DEFAULT features include `download-binaries`, which fetches a
+#      prebuilt ONNX Runtime shared library from the network during `cargo
+#      build`. A dependency that opens a socket at build time on a machine that
+#      handles PHI is exactly the thing this repository is organised to prevent
+#      happening by accident, so it gets turned on deliberately and reviewed,
+#      not inherited.
+#   2. Declaring it -- even as an optional, non-default feature -- forces cargo
+#      to resolve it against the registry and rewrite Cargo.lock, which is a
+#      network operation. The workspace must stay buildable and testable
+#      offline; `just test-airgapped` is a release gate.
+#
+# The line to add, when a human runs the one online `cargo fetch` that admits
+# it, is recorded here so the decision is reviewable rather than reconstructed:
+#
+#   [dependencies]
+#   ort = { version = "2", default-features = false, features = ["ndarray"] }
+#
+#   [features]
+#   default = []
+#   # Links a real ONNX Runtime. Without it this crate builds the stub session
+#   # only, which is what keeps the whole L2 path testable with zero weights.
+#   runtime = ["dep:ort"]
+#
+# `default-features = false` is load-bearing: it is what drops
+# `download-binaries`. The library is then located by `ORT_DYLIB_PATH` or
+# system linkage, so the operator supplies it, the build never fetches it, and
+# an air-gapped hospital host is a supported configuration rather than a
+# special case.
+#
+# The same change fills in `Availability::detect` in src/lib.rs, which today
+# reports the CPU floor unconditionally and says so. There is deliberately no
+# `#[cfg(feature = "runtime")]` in the source yet: a cfg for a feature that
+# does not exist is a branch nothing compiles, nothing tests, and everything
+# believes.
+#
+# BANNED here for the same reason it is banned in core/: any telemetry,
+# analytics or crash-reporting crate. This crate loads models; it reports
+# nothing anywhere.
+[dependencies]
+deid-tr-core = { path = "../../core" }
+thiserror = "2"

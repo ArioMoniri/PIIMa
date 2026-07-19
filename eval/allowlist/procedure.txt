@@ -1,0 +1,192 @@
+# Surgical and interventional procedure names
+#
+# Class C (medical-term allowlist) - the NEGATIVE set. Category: PROCEDURE
+# Declared in eval/schema.yaml as source_file: eval/allowlist/procedure.txt
+#
+# Terms here must NEVER be masked. Scored as a false-positive rate
+# (medical_terms.fp_rate_max <= 0.005), never as recall.
+#
+# Format: one term per line, UTF-8, sorted by Unicode code point, '#' comments.
+# Matching is case-insensitive and must also accept the Turkish suffixed forms
+# in code_switched.txt. APPEND-ONLY: never delete a term to make a build green.
+
+Doppler
+Drug-eluting bead
+ECHO
+FAST USG
+Holter
+MR enterografi
+OCT
+OGTT
+Seldinger
+Valsalva
+ablation
+adenoidectomy
+adenotonsillectomy
+adrenalectomy
+ameliyat
+amputation
+anastomosis
+anestezi
+anesthesia
+angiography
+angioplasty
+anjiyografi
+apendektomi
+arthrodesis
+arthroplasty
+arthroscopy
+aşı
+biopsy
+biyopsi
+brachytherapy
+bronchoscopy
+bypass
+bypass ameliyatı
+cardiopulmonary resuscitation
+cardioversion
+catheterization
+cesarean section
+chemotherapy
+cholecystectomy
+circumcision
+colectomy
+colonoscopy
+colostomy
+coronary angiography
+coronary artery bypass grafting
+coronary bypass
+craniotomy
+curettage
+cystectomy
+cystoscopy
+debridement
+defibrillation
+dialysis
+difüzyon
+dilatation and curettage
+discectomy
+diyaliz
+drainage
+drenaj
+duodenostomi
+ekokardiyografi
+electroconvulsive therapy
+embolectomy
+embolizasyon
+endarterectomy
+endoscopy
+enjeksiyon
+entübasyon
+epidural anesthesia
+episiotomy
+excisional biopsy
+extubation
+fasciotomy
+flap reconstruction
+frozen section
+fundoplication
+gastrectomy
+gastroscopy
+gastroskopi
+gastrostomy
+general anesthesia
+hemicolectomy
+hemodialysis
+hepatectomy
+hernioplasty
+herniorrhaphy
+hip arthroplasty
+hysterectomy
+hysteroscopy
+ileostomy
+immunotherapy
+incision
+intubation
+jejunostomy
+katarakt ameliyatı
+kateter
+kemoterapi
+keratoplasty
+kolesistektomi
+kolonoskopi
+laminectomy
+laparoscopic appendectomy
+laparoscopic cholecystectomy
+laparoscopy
+laparotomy
+laryngoscopy
+lithotripsy
+lumbar puncture
+lumpectomy
+lymphadenectomy
+mammography
+mastectomy
+mechanical ventilation
+mediastinoscopy
+myringotomy
+needle biopsy
+nephrectomy
+nephrostomy
+oophorectomy
+operasyon
+osteotomy
+pacemaker
+pacemaker implantation
+pancreatectomy
+pansuman
+paracentesis
+parathyroidectomy
+patoloji
+percutaneous coronary intervention
+pericardiocentesis
+peritoneal dialysis
+phacoemulsification
+physiotherapy
+plasmapheresis
+prostatectomy
+proximal femoral nailing
+radiotherapy
+radyoterapi
+rectoscopy
+rehabilitation
+resection
+resuscitation
+rhinoplasty
+salpingectomy
+santral katater
+sedation
+septoplasty
+sezaryen
+sigmoidoscopy
+skin graft
+sphincterotomy
+spinal anesthesia
+spirometry
+splenectomy
+stent
+stenting
+suturation
+sünnet
+sütür
+thoracentesis
+thoracoscopy
+thoracotomy
+thrombectomy
+thyroidectomy
+tiroidektomi
+tonsillectomy
+tracheostomy
+tracheotomy
+transfusion
+transplantation
+treadmill
+triyaj
+tubal ligation
+tympanoplasty
+ureteroscopy
+vagal manevra
+valvuloplasty
+vasectomy
+ventilation
+vitrectomy

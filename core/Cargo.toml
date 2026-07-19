@@ -1,0 +1,37 @@
+[package]
+name = "deid-tr-core"
+description = "Pure de-identification core for Turkish clinical text: span algebra, rules, decode, surrogates, audit."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# INVARIANT I1 IS ENFORCED HERE, IN THIS SECTION.
+#
+# `core/` must have no network dependency. PHI never leaves the device, so the
+# crate that touches PHI must be structurally incapable of sending it anywhere:
+# no HTTP client, no RPC client, no telemetry, no lazy model download. The
+# pre-commit hook (scripts/hooks/pre_commit_phi.sh, the "I1 core-has-no-network
+# dependency" block) greps the STAGED copy of this manifest for the banned crate
+# names and refuses the commit, and `just verify-hooks` refuses the build if that
+# hook is not installed. That is why the ban lives in the dependency list rather
+# than in a policy document nobody runs.
+#
+# BANNED, permanently: reqwest, ureq, hyper, tonic, isahc, surf, curl, attohttpc,
+# and any transitive introduction of them. A network client added here is
+# reverted, not debated.
+#
+# The crate also compiles to wasm32, so anything depending on std::net, std::fs
+# or a native TLS stack breaks the browser target as well as the invariant.
+[dependencies]
+thiserror = "2"
+# `regex` is PURE RUST WITH NO NETWORK SURFACE, which is why it is admissible
+# under I1 and why it is called out here rather than added silently: the
+# pre-commit hook greps this manifest, so every addition to this list has to
+# argue for itself in place. regex + regex-automata + regex-syntax +
+# aho-corasick + memchr pull in no socket, no TLS stack, no filesystem access
+# and no std::net, and the whole graph compiles to wasm32, so the browser build
+# runs the same L1 rules as the CLI. It is a dependency of the deterministic
+# layer only: L1 has a ~1ms budget, so every pattern is compiled once into a
+# process-wide OnceLock and never per call.
+regex = { version = "1", default-features = false, features = ["std", "unicode-perl", "unicode-case"] }

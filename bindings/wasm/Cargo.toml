@@ -1,0 +1,39 @@
+[package]
+name = "deid-tr-wasm"
+description = "wasm-bindgen binding for deid-tr: L1 rules, span algebra, L4 routing and L5 surrogates in the browser, with zero network surface."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+# `cdylib` is what wasm-bindgen consumes; `rlib` is kept so the crate stays
+# compilable and testable on the host target, which is the only way the logic
+# below gets exercised at all on a machine without the wasm32 toolchain.
+crate-type = ["cdylib", "rlib"]
+
+# WHY THIS DEPENDENCY LIST IS TWO LINES LONG, AND MUST STAY THAT WAY.
+#
+# The product's sales argument is "open devtools, watch the network tab stay
+# empty". That claim is only as strong as the smallest set of things that can
+# open a socket from inside the generated bundle, so the ban here is stricter
+# than I1's ban in core/: not just HTTP clients, but anything that can reach a
+# browser networking global.
+#
+# BANNED, permanently: `js-sys` and `web-sys` are NOT dependencies and are not
+# to become ones without an ADR. `web-sys` is the crate that hands Rust
+# `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Navigator::send_beacon`
+# and `caches`. A binding that links it can upload a clinical note with one
+# call, and no amount of review of OUR code proves the bundle does not, because
+# the import appears in the generated glue rather than in the source. Not
+# linking it means the wasm module's import table cannot name a networking
+# function, which is a property `tests/no_network.mjs` asserts mechanically
+# against the built artifact rather than against a promise.
+#
+# Also banned: any telemetry, analytics or crash-reporting crate, and
+# `wasm-bindgen-futures` (its only purpose here would be awaiting a JS promise,
+# and the two seams that need async are deliberately shaped so the host awaits,
+# not us -- see the module header of src/lib.rs).
+[dependencies]
+deid-tr-core = { path = "../../core" }
+wasm-bindgen = "0.2"

@@ -1,0 +1,22 @@
+# Medical device, monitoring and mobility-aid vocabulary
+#
+# Class C (medical-term allowlist) - the NEGATIVE set. Category: DEVICE
+# Declared in eval/schema.yaml as source_file: eval/allowlist/device.txt
+#
+# Terms here must NEVER be masked. Scored as a false-positive rate
+# (medical_terms.fp_rate_max <= 0.005), never as recall.
+#
+# WHY this file exists: bedside equipment vocabulary was annotated in fixtures
+# with no counterpart in any term file, so L4 had no runtime reference for it.
+# It is also a collision class - `lead`, `Monitor` and `Walker` are English
+# surnames - which is exactly the ambiguity open issue D-010 sends to the
+# adjudicator rather than short-circuiting on the allowlist.
+#
+# Format: one term per line, UTF-8, sorted by Unicode code point, '#' comments.
+# Matching is case-insensitive and must also accept the Turkish suffixed forms
+# in code_switched.txt. APPEND-ONLY: never delete a term to make a build green.
+
+lead
+monitör
+sensör
+walker
