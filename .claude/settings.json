@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(hf upload:*)",
+      "Bash(huggingface-cli upload:*)",
+      "WebFetch"
+    ],
+    "ask": [
+      "Bash(just publish:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/hooks/guard_invariants.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/hooks/block_egress.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
