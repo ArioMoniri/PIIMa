@@ -591,14 +591,27 @@ build-wasm:
         echo "  operation, and this repository does not run those on someone's behalf." >&2
         exit 1
     fi
-    if ! command -v wasm-pack >/dev/null 2>&1; then
-        echo "build-wasm: wasm-pack is not installed." >&2
-        echo "  install with: cargo install wasm-pack" >&2
+    # Either toolchain works. wasm-pack is the convenience wrapper; wasm-bindgen
+    # is what it calls underneath. Accepting both matters because requiring the
+    # wrapper made this recipe unrunnable on a machine that had the real tool.
+    if command -v wasm-pack >/dev/null 2>&1; then
+        cd bindings/wasm
+        wasm-pack build --release --target web --out-dir pkg-web
+        wasm-pack build --release --target nodejs --out-dir pkg
+    elif command -v wasm-bindgen >/dev/null 2>&1; then
+        cargo build -p deid-tr-wasm --target wasm32-unknown-unknown --release
+        mkdir -p bindings/wasm/pkg-web bindings/wasm/pkg
+        wasm-bindgen --target web --out-dir bindings/wasm/pkg-web --no-typescript \
+            target/wasm32-unknown-unknown/release/deid_tr_wasm.wasm
+        wasm-bindgen --target nodejs --out-dir bindings/wasm/pkg --no-typescript \
+            target/wasm32-unknown-unknown/release/deid_tr_wasm.wasm
+    else
+        echo "build-wasm: neither wasm-pack nor wasm-bindgen is installed." >&2
+        echo "  install either: cargo install wasm-pack" >&2
+        echo "                  cargo install wasm-bindgen-cli" >&2
         exit 1
     fi
-    cd bindings/wasm
-    wasm-pack build --release --target web --out-dir pkg-web
-    wasm-pack build --release --target nodejs --out-dir pkg
+
 
 # The no-upload proof, and the recipe the product's central claim rests on.
 #
@@ -642,4 +655,17 @@ serve-panel:
         exit 1
     fi
     echo "open http://127.0.0.1:8722/tests/index.html and watch the Network tab"
-    cd bindings/wasm && {{python}} -m http.server 8722 --bind 127.0.0.1
+    echo "Ctrl-C to stop. Nothing pasted into the panel leaves this machine."
+    # no-store, because http.server otherwise lets the browser hold a stale copy
+    # of the page and its glue. Editing the panel and reloading then shows the
+    # OLD revision with no indication it is old, which is an afternoon lost to
+    # debugging a bug that was already fixed on disk.
+    cd bindings/wasm && {{python}} - <<'PY'
+    import functools, http.server
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def end_headers(self):
+            self.send_header("Cache-Control", "no-store")
+            super().end_headers()
+    http.server.HTTPServer(("127.0.0.1", 8722),
+        functools.partial(Handler, directory=".")).serve_forever()
+    PY
