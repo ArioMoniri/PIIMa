@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "bindings/cli",
+    "bindings/llm",
+    "bindings/mcp",
+    "bindings/ort",
+    "bindings/wasm",
+    "core",
+    # An EVAL instrument, not a shipped surface. It runs the real pipeline over
+    # the synthetic corpus so eval/redteam/ can attack the product rather than a
+    # gold-derived reference masker. See eval/rust-bridge/Cargo.toml.
+    "eval/rust-bridge",
+]
+
+# `bindings/python` is a MEMBER OF NOTHING, deliberately.
+#
+# It depends on `pyo3`, which is not in this machine's cargo registry cache, so
+# listing it as a member would make cargo resolve the registry to update
+# Cargo.lock -- a NETWORK operation -- on every `cargo build`, `cargo test` and
+# `cargo clippy` in this workspace. `just test-airgapped` is a release gate and
+# offline-buildability is not negotiable, so the crate stays out of the lock
+# file until a human runs the one online `cargo fetch` that admits it.
+#
+# This is the same reasoning `bindings/ort/Cargo.toml` records for not
+# declaring `ort`: a dependency that forces a resolve is a dependency that
+# breaks the air-gapped build, and the workspace refuses to acquire one by
+# accident.
+exclude = ["bindings/python"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/ArioMoniri/PIIMa"
