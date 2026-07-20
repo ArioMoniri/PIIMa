@@ -722,3 +722,299 @@ Micro F1 0.4149 -> 0.5423.
 
 - Delete the `DBG` println above, and give the router escalation rate a row in the eval report so a
   cost regression is as visible as an accuracy one (D-027's third consequence).
+
+---
+
+## 2026-07-20 — The honest OpenMed comparison, and four ADRs for this session's policy decisions
+
+Milestone **M0/M1**. This entry covers one deliverable — `docs/COMPARISON.md` — plus the ADRs the
+session's other decisions needed. It changes no detection code and no threshold.
+
+### CHANGED
+
+- **`docs/COMPARISON.md` (new, 7 sections).** The public comparison against OpenMed, written from
+  the research agent's verified inventory. Structure: (1) what OpenMed is and does better,
+  (2) what deid-tr does differently and can defend, (3) a four-part feature matrix, (4) where our
+  design is deliberately more conservative and what it costs, (5) when to use which, (6) our
+  measured numbers in full, (7) what would change the comparison.
+  - **It states in the header, in section 1, in section 3.1 and in section 6.2 that deid-tr masks
+    ZERO names, and that OpenMed wins any Turkish head-to-head detection benchmark today.** Section
+    5 recommends OpenMed for almost every current use and for anything needing names masked.
+  - **Rule applied to the matrix: nothing is marked `yes` for deid-tr unless demonstrated end to end
+    through a shipped binary** (`bindings/cli`, `bindings/mcp`). `bindings/wasm` is `partial`,
+    `bindings/python` is `no` because it is excluded from the cargo workspace and is not built here.
+- **`docs/DECISIONS.md` — four ADRs appended, D-032 to D-035.** D-031 was the last existing id; the
+  historical D-023 collision is upstream of these and untouched.
+  - **D-032 — two redaction methods, not six.** Surrogates by default, `--placeholder-labels` as the
+    named opt-out. `remove` rejected (destroys the span-map alignment the M2 round trip needs, D-025),
+    `hash` rejected (deterministic across documents = a cross-document linkage primitive, which is
+    one of the seven L6 attack classes), separately-selectable `shift_dates` rejected.
+  - **D-033 — true PDF redaction, and refusal on scanned pages.** Remove the glyphs from the content
+    stream, strip metadata/annotations/incremental history, re-extract and re-scan the output before
+    writing, and **exit non-zero naming the page when a page has no extractable text layer**.
+    Draw-and-flatten and box-drawing both rejected; OCR-then-redact rejected on the honesty ground
+    that Turkish clinical OCR recall is unmeasured by anything in `eval/`.
+  - **D-034 — NFC, and nothing else.** NFC once at the ingestion boundary in `bindings/`, never in
+    `core/`; NFKC/NFD/NFKD forbidden. NFKC is rejected as clinically destructive (`µ`->`μ`,
+    `℃`->`°C`, ligatures, superscript dosages) over an unbounded table we do not control; NFD is
+    rejected because decomposing a Turkish letter multiplies char boundaries inside every name.
+    The compatibility folds we DO want are done explicitly and reversibly over the candidate span
+    only, by `core/src/text/digits.rs` and `core/src/text/invisible.rs`.
+  - **D-035 — the REST service binds loopback only.** `bindings/service` is the first deid-tr
+    surface with a socket (the MCP gateway has none, D-026). Non-loopback addresses rejected at
+    parse time by value, not by string match; exposure needs `--expose` AND an operator-supplied
+    bearer token AND a startup warning; no environment variable can enable it; **any shipped
+    container file publishes `127.0.0.1:PORT:PORT`**, which is named explicitly because that is the
+    exact place the rule is lost next door.
+
+### NUMBERS PUBLISHED IN COMPARISON.md, MEASURED THIS SESSION
+
+`python3 eval/run.py --detector pipeline --redteam-report eval/results/redteam.json` over 178
+documents / 1,516 direct gold spans / 229 quasi gold spans / 1,283 allowlist annotations:
+
+| Metric | Observed | Gate | Verdict |
+|---|---|---|---|
+| Micro F1, direct (relaxed) | 0.5425 | >= 0.95 | FAIL |
+| Micro recall / precision, direct | 0.3912 / 0.8851 | — | reported |
+| Recall, HIPAA-critical | 0.4291 | >= 0.98 | FAIL |
+| Document leak rate (152 attackable docs) | 0.9474 (144/152) | <= 0.02 | FAIL |
+| Medical-term FP, vocabulary denominator | 0.000494 | <= 0.005 | PASS |
+| Contextual re-ID, red-team measured | 0.9091 (150 of 165 attackable) | <= 0.05 | FAIL |
+| Sight-unseen recall drop | -0.0213 | <= 0.05 | PASS |
+| Checksum-validated ID precision | null | 1.000 | UNENFORCEABLE (D-030) |
+
+Per-entity recall: 1.0000 for TCKN, VKN, SGK_NO, IBAN, MRN, PHONE, EMAIL, DATE_BIRTH; 0.7917
+DATE_DISCHARGE, 0.6667 DATE_DEATH, 0.5742 DATE_ADMISSION; **0.0000 for all three name labels
+(PATIENT_NAME, CLINICIAN_NAME, RELATIVE_NAME — 516 gold spans) and for the other 18 model-dependent
+labels.**
+
+### BROKE / FOUND
+
+- **The gate tally depends on red-team provenance, and the two answers differ by one.** The run
+  reproduced for this document reports **10 PASS / 27 FAIL / 2 UNENFORCEABLE of 39**, because the
+  working tree has moved past `eval/results/redteam.json`'s `eval_sha` and D-029 therefore refuses
+  to populate `contextual.reid_rate`. When the report's `eval_sha` and `detector` match the run,
+  that gate becomes enforceable and fails at 0.9091, giving **28 of 39 failing**. COMPARISON.md
+  section 6.1 states both and says which is which. Nobody should quote one without the condition.
+- **`recall.TCKN = 1.0000` is a regex result, not a checksum result.** I8 forbids a checksum-valid
+  TCKN in the repository, so all 128 eleven-digit runs in the gold set fail their check digits and
+  no span in the run is checksum-validated. COMPARISON.md says this next to the number, because
+  "TCKN recall 1.0" read alone implies the checksum path was exercised and it was not (D-030).
+- **The brief's criticism of OpenMed's Turkish cards was half stale, and the stale half is not
+  repeated.** Still true: the v1 PyTorch cards carry `language: ar`, Arabic widgets and the Arabic
+  model's F1/P/R. Now false: "all backbones are English-only/uncased" (~7 of ~32 are multilingual —
+  XLM-R base/large, mDeBERTa-v3-base, distilbert-base-multilingual-cased, bge-m3,
+  snowflake-arctic-embed-l-v2.0, Qwen3-Embedding-0.6B), and the July-2026 ONNX/Android derivative
+  now carries `language: tr` with the Arabic content removed — though it publishes no Turkish
+  metrics in place of the Arabic ones. COMPARISON.md 1.1 states all three findings and the four
+  things we explicitly do NOT claim.
+- **OpenMed's `SurrogateVault` is better than our `Span::text_hash` and the document says so.**
+  Their keyed HMAC over `(canonical_label, lang, text_hash)` is the design our open issue #3 wants;
+  ours is an unkeyed 64-bit FNV-1a, brute-forceable by anyone holding a span map.
+- **Two of seven L6 attack classes still have no fixture** (`structural_leakage`, `format_tells`).
+  Recorded in COMPARISON.md 3.4 as `partial`, with the reason: an unattacked class is not a
+  defended one.
+- The `DBG` `println!` at `core/src/route/mod.rs:165` flagged in the previous entry was **not**
+  touched by this session and is still there.
+
+### OPEN
+
+- D-033, D-034 and D-035 are policy for surfaces under construction in this same session
+  (`bindings/files`, `bindings/service`, `core/src/redact/`, `core/src/text/`). If the agents
+  building those appended their own ADRs concurrently, the ids may collide with D-032..D-035 and a
+  later entry must supersede rather than edit.
+- COMPARISON.md is not referenced from `README.md`; the README is owned by a later step.
+
+### NEXT
+
+- A trained, evaluated L2. It is the only thing that changes section 5 of COMPARISON.md, and until
+  it exists every honest recommendation this project makes for Turkish clinical text points at
+  someone else's software.
+
+## 2026-07-20 — L1 matches against the Unicode skeleton (I2: recall.TCKN 0.9792 -> 1.0000)
+
+### CHANGED
+
+- `core/src/rules/mod.rs` — `Doc` is now a thin wrapper over `text::Skeleton` at `Fold::Skeleton`
+  instead of a private digit-only normaliser. `Doc::new` / `text` / `anchor` delegate; `emit` and
+  `emit_checksum` are unchanged and remain the only path from a matching offset to a `Span`.
+  Header rewritten to say why there is exactly one normaliser.
+- `core/src/text/normalize.rs` — `Skeleton::new` drops an exotic space that sits BETWEEN TWO DIGITS
+  rather than folding it to an ASCII space (D-036 rule 2). A dropped zero-width character does not
+  reset the "previous was a digit" state, so `12<ZWSP><NBSP>34` bridges too. The ASCII space is
+  never bridged.
+- `core/src/route/allowlist.rs` — `MedicalAllowlist::lookup` returns no entry for a mixed-script
+  token, wiring `text::is_mixed_script` into the allowlist short-circuit (D-036 rule 4).
+- `core/src/text/mod.rs` — header now names its callers (L1's `Doc`, L4's allowlist) and names the
+  four public items that remain SIGNALS rather than enforced controls. The `detect_over_skeleton`
+  test helper, which existed because L1 did not call this module, is now one line calling
+  `RuleSet::detect`; the assertion that "the fixture must defeat the un-hardened layer" is gone
+  because there is no un-hardened layer left.
+
+### TESTS ADDED
+
+- `rules::tests::an_invisible_character_inside_an_id_does_not_hide_it_from_this_layer` — one case
+  per measured failure: U+200D, U+00AD, U+200B, U+FEFF, U+00A0, U+2060. Each asserts the span is
+  checksum-validated, covers the ORIGINAL bytes including the interior invisible character, and
+  lands on char boundaries at both ends. Failed before the change on all six.
+- `rules::tests::a_bidi_wrapper_neither_hides_an_id_nor_gets_swallowed_by_its_span` — the
+  already-passing class, pinned so the integration cannot regress it.
+- `rules::tests::the_four_turkish_i_letters_survive_the_layers_normalisation` — I6's signal checked
+  at the layer that now owns the fold, plus `I`+U+0307 -> `İ` rather than `I`.
+- `normalize::tests::an_exotic_space_between_two_digits_is_dropped_rather_than_folded` and
+  `..::a_digit_run_stays_bridgeable_across_a_zero_width_character`.
+- `allowlist::tests::a_homoglyph_disguised_term_earns_no_allowlist_keep`.
+
+### MEASURED
+
+- `recall.TCKN` 0.9792 -> 1.0000 (strict and relaxed), gate 0.98 PASS. Fixtures adv-unicode-0004
+  and -0005 now detect.
+- No other entity's recall changed. micro relaxed recall 0.3888 -> 0.3901, precision 0.8859 ->
+  0.8863. Document leak rate unchanged (0.9451). Medical-term FP rate unchanged.
+- `cargo test -p deid-tr-core` 423+6+10+9 pass; `cargo clippy --all-targets -D warnings` clean;
+  `cargo build -p deid-tr-core --target wasm32-unknown-unknown` succeeds.
+
+### BROKE
+
+- Nothing. The one test that failed on the change —
+  `text::adversarial::a_tckn_split_by_a_zero_width_joiner_is_still_detected` — failed on its own
+  assertion that L1 was still un-hardened, which the change made false.
+
+### STILL TRUE
+
+- deid-tr masks ZERO person names. Folding a homoglyph out of `Аyşe` yields an `Ayşe` that nothing
+  is looking for, because L2 has no model. The fold is a precondition for a detector, not a
+  detector. Every gate below is unaffected by this session and still FAIL.
+
+### NEXT
+
+- `Fold::Compose`, `Skeleton::original_slice`, `contains_invisible` and `contains_bidi_control`
+  have no pipeline consumer. Either an audit signal consumes `contains_bidi_control` (an RLO in a
+  Turkish clinical note has no innocent explanation) or they are deleted.
+
+## 2026-07-20 — COMPARISON.md published numbers that did not reproduce; every figure rebuilt from one run
+
+### CHANGED
+
+- `docs/COMPARISON.md`: every deid-tr figure now comes from a single named run,
+  `20260719T234410Z-pipeline` (`eval/results/20260719T234410Z-pipeline.json`), scored against a
+  red-team report re-run from the same tree (`eval/results/redteam.json`, run id
+  `20260719T234404Z-pipeline`, masker `pipeline`). Run id, `eval_sha`, `schema_sha`,
+  `thresholds_sha` and the exact two-command sequence are recorded in a block at the top of the
+  document. The section 6 tables were printed from that artifact, not transcribed.
+- Section 6 restated: corpus 190 documents / 1,538 direct spans / 229 quasi / 1,293 allowlist terms;
+  micro F1 0.5418, micro recall 0.3901, micro precision 0.8863, HIPAA-critical recall 0.4269,
+  document leak rate 0.9451 (155 of 164), contextual re-ID 0.8983 (159 of 177 attackable),
+  medical-term FP 0.000488 vocabulary / 0.0000 annotated, sight-unseen drop -0.0213,
+  `checksum_id_precision` null. Gate tally **10 PASS / 28 FAIL / 1 UNENFORCEABLE of 39**.
+- Section 3.3 `REST service` row corrected from "no (policy fixed in advance: D-035)" to yes:
+  `deid-serve` ships, builds and runs. Verified by starting it and calling `/health` — it binds
+  `127.0.0.1` with no flags and reports `exposed: false`.
+- Four more section 3 rows corrected against what actually ships: browser panel
+  (`bindings/wasm/panel`, `just serve-panel`), batch redaction (`deid mask --batch`, verified end to
+  end, text-only, no CSV/JSONL column parsing, no Parquet), DOCX and PDF (implemented in
+  `deid-tr-files`, which **no shipped binary links** — so by the table's own rule they stay `no`).
+- Two unsupported claims about OpenMed deleted: a published-checkpoint count and a cumulative-
+  download figure, neither of which traced to their cards, their docs or their repository. An
+  unverified public claim about a competitor is the same epistemic failure we accuse them of, and
+  it does not become acceptable by being a compliment. Several absence claims softened from "no" /
+  "not established" to "not documented", which is what we actually checked.
+- Section 4 now marks the 40.0% router escalation rate as the one figure NOT from the named run,
+  with its real denominator.
+
+### BROKE / FOUND
+
+- **The published numbers did not reproduce, and this is the defect the whole project exists to
+  criticise.** The document printed a command and then printed numbers from a different, older run:
+  178 documents against the corpus's 190, TCKN recall 1.0000 where the tree produced 0.9792, micro
+  F1 0.5425 against 0.5404, document leak 0.9474 (144/152) against 0.9451 (155/164), and a gate
+  tally of 10/27/2 against the actual 9/29/1. Found by doing nothing cleverer than running the
+  command the document gives and diffing the output against the document.
+- **The TCKN recall regression was real and was caused by an append, not a break.** 12 adversarial
+  Unicode fixtures (`eval/adversarial/adv_unicode.jsonl`) added 2 TCKNs that L1 could not see, and
+  recall fell 1.0000 -> 0.9792 — I7 working exactly as intended. Restored to 1.0000 by the
+  skeleton-matching change logged in the entry above; this document waited for that to land and
+  then re-ran, rather than publishing around it.
+- **"Everything with a rule behind it is at or near 1.0000" was false in the document's own table.**
+  `DATE_DISCHARGE` 0.7917, `DATE_DEATH` 0.6667 and `DATE_ADMISSION` 0.5742 are rule-detected and
+  all three are below their floors. Corrected to the narrower true claim: every label with a
+  deterministic FORMAT is at 1.0000. The sentence had survived because the paragraph immediately
+  below it explained the counter-example without anyone noticing it was a counter-example.
+- **"The red team cannot report a result for a class it has nothing to run" was false.**
+  `structural_leakage` and `format_tells` have no dedicated fixture, but the attacks run over the
+  whole corpus and both breached in this run (122 and 55 documents). What is missing is deliberate
+  probing, not any result at all. Restated.
+- **D-029's provenance check passed by comparing `uncommitted` to `uncommitted`.** With a dirty
+  tree, both the run and the red-team report carry the string `uncommitted` as their `eval_sha`,
+  and they "match". That proves both came from unrecorded code, not that they came from the SAME
+  code. Stated plainly at the top of COMPARISON.md rather than left as a footgun. Under I5 no card
+  may ship carrying this run.
+- **Two corpus-derived measurements lag the corpus.** The router escalation rate (D-027, 268 of 670)
+  and the surrogate length correlation (D-028, 1516 pairs) both walk 178 records while the eval
+  harness walks 190. Neither is wrong; both are quoted for a smaller corpus than the one section 6
+  scores, and COMPARISON.md now says so at each site. A follow-up task was filed for the router one.
+- `DATE_DEATH` length correlation r = 1.0000 is over **n=6**. The row now leads with the two
+  large-n figures instead.
+
+### STILL TRUE
+
+- deid-tr masks ZERO person names. `PATIENT_NAME`, `CLINICIAN_NAME` and `RELATIVE_NAME` are 0.0000
+  over 531 gold spans. Every section of COMPARISON.md says so and section 5 still recommends
+  OpenMed for any Turkish clinical text where names must be removed.
+- The document's criticism of OpenMed's Turkish cards remains scoped to what was verified on the
+  live cards: the v1 PyTorch repos carry `language: ar`, Arabic widgets and the Arabic model's
+  F1/P/R, so no Turkish evaluation number is published for them; the July-2026 ONNX/Android
+  derivative fixed the language tag and published no metrics in place of the Arabic ones; roughly 7
+  of ~32 use a genuinely multilingual backbone, so "all English-only/uncased" is NOT said.
+
+### NEXT
+
+- Commit, so that `eval_sha` stops being `uncommitted` and section 6 becomes reproducible from a
+  checkout rather than merely honest about a moving tree. Nothing in this document should be quoted
+  externally until then.
+
+## 2026-07-20 -- redact/ and output/ were never compiled; bindings/files had no consumer
+
+**Changed.**
+- `core/src/lib.rs`: declared `pub mod output;` and `pub mod redact;`. Both directories
+  (~2,350 lines, 58 tests) existed on disk and were absent from the module tree, so they
+  were never built, their tests never ran, and `deid_tr_core::redact` did not resolve. The
+  Hash and Redact methods existed in no built artifact. Re-exported `Report`, `EntityRow`,
+  `HtmlOptions`, `RedactionPolicy`, `RedactionMethod`, `Redactor`, `Redacted`,
+  `RedactedSpan`, `Blackout`, `HashKey`, `RedactError`, `Rendered`.
+- `core/src/redact/mod.rs`: added `Rendered` and `Redactor::replacement_for`, the
+  single-span seam the orchestrator renders through. `Redactor::redact` now builds on it,
+  so there is exactly one method-resolution rule in the crate.
+- `core/src/pipeline.rs`: `Pipeline::with_redaction_policy` / `with_hash_key` /
+  `redaction_policy`, so a caller selects a redaction method PER ENTITY TYPE. The
+  effective default is derived (`Surrogate` with L5 installed, `Mask` without), which is
+  byte-for-byte the behaviour that predates the seam. `MappedSpan::applied_method` records
+  what was APPLIED, not what was requested. `placeholder()` deleted -- one rendering path.
+- `core/src/error.rs`: `Error::RedactionFailed { kind: RedactionFailure }`, a closed
+  vocabulary (I4). `From<RedactError>` passes offset and surrogate defects through rather
+  than renaming them.
+- `bindings/cli/src/maskfile.rs` (new): `deid mask-file IN --out OUT`, with content-first
+  format auto-detection and `--input-format`. `bindings/files` -- the PDF/DOCX/CSV/JSON
+  crate -- previously had NO CONSUMER; no shipped binary could reach a line of it.
+  In-place rewriting is refused. Verified end-to-end: a TCKN in a PDF content stream is
+  gone from the output bytes.
+- `bindings/cli/src/mask.rs`: `deid mask` now reads BYTES and refuses PDF/DOCX/unknown
+  containers, naming `mask-file`. Measured defect: an UNCOMPRESSED PDF is valid UTF-8, so
+  it read cleanly, took the text path, and came out with its cross-reference table
+  overwritten by a surrogate -- a corrupt file that looked redacted. CSV/JSON/JSONL are
+  still accepted, because masking them as text does remove every identifier.
+- `bindings/cli/tests/mask_path_is_offline.rs`: `maskfile.rs` added to `DOCUMENT_MODULES`
+  and its dispatch arm to the scanned slice. The I1 structural proof covers it too.
+
+**Broke.** Nothing. 860 workspace tests pass (was 802 before the module declarations);
+`fmt`, `clippy -D warnings`, `test-airgapped`, `core-no-socket`, `drift-check` green;
+`core/` still builds for `wasm32-unknown-unknown`.
+
+**Not fixed, reported only.** `just lint` fails on `mypy --strict eval/schema.py`:
+`Library stubs not installed for "yaml"`. Pre-existing at HEAD, verified against a clean
+stash, and installing `types-PyYAML` is a network operation.
+
+**Next.** `bindings/python` is a member of nothing (deliberately, for the air-gap reason
+in the workspace manifest), so its tests never appear in any `cargo test` output. That is
+the same never-built failure mode, currently accepted. It needs either the one online
+`cargo fetch` that admits it, or a documented CI job that builds it separately.

@@ -640,22 +640,53 @@ test-wasm:
     fi
     node bindings/wasm/tests/no_network.mjs
 
-# Serve the offline panel so the network claim can be checked by eye.
+# Serve the real panel: bindings/wasm/panel/.
+#
+# WHY THIS RECIPE IS NAMED FOR THE PANEL AND POINTS AT THE PANEL: it used to
+# serve bindings/wasm/tests/index.html, the stripped-down offline-proof page.
+# That page carries no names-not-masked banner and no confidence slider, so the
+# one command anybody runs to look at this product showed the weakest surface
+# while the honest one was reachable from no recipe at all. On a tool whose
+# headline risk is a clinician assuming names were removed, showing the page
+# without the disclosure is the defect, not a packaging detail.
+#
+# The proof page keeps its own recipe below: it is a real artifact — the minimal
+# demonstration with nothing else on it to explain a request away.
+#
+# Serve the full panel on 127.0.0.1: banner, slider and an empty Network tab.
+serve-panel: (_serve "panel/index.html")
+
+# Serve the minimal offline-proof page: bindings/wasm/tests/index.html.
+#
+# Same module, same load sequence, none of the panel's UI: with as little on the
+# page as possible, nothing on screen can be blamed for a request.
+#
+# Serve the minimal offline-proof page on 127.0.0.1.
+serve-offline-proof: (_serve "tests/index.html")
+
+# The shared server for both pages above. Private: `just serve-panel` is the
+# entry point, and a bare page path is not one.
 #
 # I3: bound to 127.0.0.1 explicitly, never 0.0.0.0 and never "::". This serves a
 # page whose whole point is that nothing leaves the machine; listening on a
 # routable interface to do it would be its own punchline.
 #
-# Serve the offline panel on 127.0.0.1 so the empty Network tab can be seen.
-serve-panel:
+# The document root is bindings/wasm rather than the page's own directory,
+# because both pages load the module from the sibling ../pkg-web/ and a root at
+# the page directory puts that path outside the served tree.
+_serve page:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ ! -d bindings/wasm/pkg-web ]; then
-        echo "serve-panel: no web build; run 'just build-wasm' first." >&2
+        echo "serve: no web build; run 'just build-wasm' first." >&2
         exit 1
     fi
-    echo "open http://127.0.0.1:8722/tests/index.html and watch the Network tab"
-    echo "Ctrl-C to stop. Nothing pasted into the panel leaves this machine."
+    if [ ! -f "bindings/wasm/{{page}}" ]; then
+        echo "serve: bindings/wasm/{{page}} does not exist." >&2
+        exit 1
+    fi
+    echo "open http://127.0.0.1:8722/{{page}} and watch the Network tab"
+    echo "Ctrl-C to stop. Nothing pasted into the page leaves this machine."
     # no-store, because http.server otherwise lets the browser hold a stale copy
     # of the page and its glue. Editing the panel and reloading then shows the
     # OLD revision with no indication it is old, which is an afternoon lost to

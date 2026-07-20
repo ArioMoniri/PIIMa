@@ -1,0 +1,1946 @@
+{
+  "base_model": null,
+  "contextual": {
+    "coverage": 0.0,
+    "reid_rate": null,
+    "reid_rate_provenance": {
+      "accepted_for_gate": false,
+      "detector": "pipeline:safe_harbor",
+      "eval_sha": "uncommitted",
+      "masker": "pipeline",
+      "masker_kind": "pipeline",
+      "measured_reid_rate": 0.9090909090909091,
+      "rejected_because": "the report was produced against detector='pipeline:safe_harbor' but this run scores 'null'",
+      "report_path": "/Users/ario/Downloads/PIIMa/eval/results/redteam.json",
+      "rule": "contextual.reid_rate is populated ONLY from a red-team report whose masker is the real pipeline and whose detector and eval_sha match the run being scored. A rate from any other masker is calibration: it measures the red team, not deid-tr.",
+      "run_id": "20260719T203443Z-pipeline",
+      "validated_by": "l6_reid_red_team (masker=pipeline)"
+    },
+    "validated_by": null
+  },
+  "corpus": {
+    "adversarial_documents": 74,
+    "allowlist_terms": 1293,
+    "direct_spans": 1538,
+    "documents": 190,
+    "l6_attack_classes_with_no_fixture": [
+      "structural_leakage",
+      "format_tells"
+    ],
+    "per_attack_class": {
+      "cross_document_linkage": 2,
+      "direct_identifier_edge_case": 25,
+      "format_tells": 0,
+      "indirect_reference": 2,
+      "medical_term_false_positive": 37,
+      "narrative_survival": 2,
+      "quasi_identifier_combination": 3,
+      "rare_value_survival": 3,
+      "structural_leakage": 0
+    },
+    "per_label": {
+      "ACCOUNT_NO": 5,
+      "ADDRESS_CITY": 42,
+      "ADDRESS_DISTRICT": 45,
+      "ADDRESS_STREET": 42,
+      "AGE_OVER_89": 22,
+      "ASSET_LOCATION": 30,
+      "BIOMETRIC_ID": 3,
+      "CERTIFICATE_NO": 5,
+      "CLINICIAN_NAME": 231,
+      "DATE_ADMISSION": 155,
+      "DATE_BIRTH": 90,
+      "DATE_DEATH": 6,
+      "DATE_DISCHARGE": 24,
+      "DEVICE_ID": 15,
+      "DISTINCTIVE_EVENT": 22,
+      "EMAIL": 29,
+      "EMPLOYER_ROLE": 93,
+      "FACILITY_NAME": 83,
+      "HEALTH_PLAN_ID": 11,
+      "IBAN": 6,
+      "IP_ADDRESS": 8,
+      "LICENSE_PLATE": 8,
+      "MRN": 153,
+      "OTHER_UNIQUE_ID": 11,
+      "PASSPORT_NO": 3,
+      "PATIENT_NAME": 249,
+      "PHONE": 99,
+      "PHOTO_REF": 5,
+      "POSTAL_CODE": 13,
+      "RARE_ATTRIBUTE_COMBO": 23,
+      "RELATIONSHIP_REF": 61,
+      "RELATIVE_NAME": 51,
+      "SGK_NO": 11,
+      "TCKN": 96,
+      "URL": 11,
+      "VEHICLE_ID": 2,
+      "VKN": 4
+    },
+    "per_split": {
+      "adversarial": 74,
+      "dev": 80,
+      "sight_unseen": 36
+    },
+    "quasi_spans": 229
+  },
+  "dataset_name": "TurkDeID-Bench",
+  "dataset_type": "deid-tr/TurkDeID-Bench",
+  "detail": {
+    "contextual": {
+      "coverage": 0.0,
+      "coverage_is_diagnostic_only": true,
+      "coverage_note": "Fraction of gold quasi spans overlapped by some predicted span. NOT a validated score: contextual quasi-identifiers are not scored by F1. The authoritative number is reid_rate, which comes from the L6 red team.",
+      "covered_quasi_spans": 0,
+      "gold_quasi_spans": 229,
+      "reid_rate": null,
+      "reid_rate_is_authoritative": true,
+      "reid_rate_provenance": {
+        "accepted_for_gate": false,
+        "detector": "pipeline:safe_harbor",
+        "eval_sha": "uncommitted",
+        "masker": "pipeline",
+        "masker_kind": "pipeline",
+        "measured_reid_rate": 0.9090909090909091,
+        "rejected_because": "the report was produced against detector='pipeline:safe_harbor' but this run scores 'null'",
+        "report_path": "/Users/ario/Downloads/PIIMa/eval/results/redteam.json",
+        "rule": "contextual.reid_rate is populated ONLY from a red-team report whose masker is the real pipeline and whose detector and eval_sha match the run being scored. A rate from any other masker is calibration: it measures the red team, not deid-tr.",
+        "run_id": "20260719T203443Z-pipeline",
+        "validated_by": "l6_reid_red_team (masker=pipeline)"
+      },
+      "validated_by": null
+    },
+    "detector_name": "null",
+    "direct": {
+      "checksum_id_counts": {
+        "f1": null,
+        "gold": 0,
+        "precision": null,
+        "predicted": 0,
+        "recall": null,
+        "true_positives": 0
+      },
+      "checksum_id_precision": null,
+      "checksum_id_precision_denominator": "spans a checksum ACTUALLY VALIDATED, not spans carrying a checksum-validatable label. I8 forbids a checksum-valid Turkish ID from existing in this repository, so on this corpus the denominator is zero and the metric is n/a. The protection path is exercised instead by the synthetic runtime suite core/tests/checksum_protection_armed.rs.",
+      "document_leak_rate": 0.8631578947368421,
+      "document_leak_rate_denominator_note": "A document with zero direct gold spans cannot leak a direct identifier, so it dilutes the over-all-documents rate downward without any detection having occurred. The gate reads the over-documents-with-direct-spans rate, which is the honest one.",
+      "document_leak_rate_over_all_documents": 0.8631578947368421,
+      "document_leak_rate_over_documents_with_direct_spans": 1.0,
+      "documents_evaluated": 190,
+      "documents_excluded_no_direct_identifier": 26,
+      "documents_leaked": 164,
+      "documents_leaking": 164,
+      "documents_with_direct_spans": 164,
+      "micro_relaxed": {
+        "f1": null,
+        "gold": 1538,
+        "precision": null,
+        "predicted": 0,
+        "recall": 0.0,
+        "true_positives": 0
+      },
+      "micro_strict": {
+        "f1": null,
+        "gold": 1538,
+        "precision": null,
+        "predicted": 0,
+        "recall": 0.0,
+        "true_positives": 0
+      },
+      "per_entity_relaxed": {
+        "ACCOUNT_NO": {
+          "f1": null,
+          "gold": 5,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "ADDRESS_CITY": {
+          "f1": null,
+          "gold": 42,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "ADDRESS_DISTRICT": {
+          "f1": null,
+          "gold": 45,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "ADDRESS_STREET": {
+          "f1": null,
+          "gold": 42,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "AGE_OVER_89": {
+          "f1": null,
+          "gold": 22,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "BIOMETRIC_ID": {
+          "f1": null,
+          "gold": 3,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "CERTIFICATE_NO": {
+          "f1": null,
+          "gold": 5,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "CLINICIAN_NAME": {
+          "f1": null,
+          "gold": 231,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "DATE_ADMISSION": {
+          "f1": null,
+          "gold": 155,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "DATE_BIRTH": {
+          "f1": null,
+          "gold": 90,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "DATE_DEATH": {
+          "f1": null,
+          "gold": 6,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "DATE_DISCHARGE": {
+          "f1": null,
+          "gold": 24,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "DEVICE_ID": {
+          "f1": null,
+          "gold": 15,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "EMAIL": {
+          "f1": null,
+          "gold": 29,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "FACILITY_NAME": {
+          "f1": null,
+          "gold": 83,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "HEALTH_PLAN_ID": {
+          "f1": null,
+          "gold": 11,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "IBAN": {
+          "f1": null,
+          "gold": 6,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "IP_ADDRESS": {
+          "f1": null,
+          "gold": 8,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "LICENSE_PLATE": {
+          "f1": null,
+          "gold": 8,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "MRN": {
+          "f1": null,
+          "gold": 153,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "OTHER_UNIQUE_ID": {
+          "f1": null,
+          "gold": 11,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "PASSPORT_NO": {
+          "f1": null,
+          "gold": 3,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "PATIENT_NAME": {
+          "f1": null,
+          "gold": 249,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "PHONE": {
+          "f1": null,
+          "gold": 99,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "PHOTO_REF": {
+          "f1": null,
+          "gold": 5,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "POSTAL_CODE": {
+          "f1": null,
+          "gold": 13,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "RELATIVE_NAME": {
+          "f1": null,
+          "gold": 51,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "SGK_NO": {
+          "f1": null,
+          "gold": 11,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "TCKN": {
+          "f1": null,
+          "gold": 96,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "URL": {
+          "f1": null,
+          "gold": 11,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "VEHICLE_ID": {
+          "f1": null,
+          "gold": 2,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "VKN": {
+          "f1": null,
+          "gold": 4,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        }
+      },
+      "per_entity_strict": {
+        "ACCOUNT_NO": {
+          "f1": null,
+          "gold": 5,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "ADDRESS_CITY": {
+          "f1": null,
+          "gold": 42,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "ADDRESS_DISTRICT": {
+          "f1": null,
+          "gold": 45,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "ADDRESS_STREET": {
+          "f1": null,
+          "gold": 42,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "AGE_OVER_89": {
+          "f1": null,
+          "gold": 22,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "BIOMETRIC_ID": {
+          "f1": null,
+          "gold": 3,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "CERTIFICATE_NO": {
+          "f1": null,
+          "gold": 5,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "CLINICIAN_NAME": {
+          "f1": null,
+          "gold": 231,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "DATE_ADMISSION": {
+          "f1": null,
+          "gold": 155,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "DATE_BIRTH": {
+          "f1": null,
+          "gold": 90,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "DATE_DEATH": {
+          "f1": null,
+          "gold": 6,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "DATE_DISCHARGE": {
+          "f1": null,
+          "gold": 24,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "DEVICE_ID": {
+          "f1": null,
+          "gold": 15,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "EMAIL": {
+          "f1": null,
+          "gold": 29,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "FACILITY_NAME": {
+          "f1": null,
+          "gold": 83,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "HEALTH_PLAN_ID": {
+          "f1": null,
+          "gold": 11,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "IBAN": {
+          "f1": null,
+          "gold": 6,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "IP_ADDRESS": {
+          "f1": null,
+          "gold": 8,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "LICENSE_PLATE": {
+          "f1": null,
+          "gold": 8,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "MRN": {
+          "f1": null,
+          "gold": 153,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "OTHER_UNIQUE_ID": {
+          "f1": null,
+          "gold": 11,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "PASSPORT_NO": {
+          "f1": null,
+          "gold": 3,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "PATIENT_NAME": {
+          "f1": null,
+          "gold": 249,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "PHONE": {
+          "f1": null,
+          "gold": 99,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "PHOTO_REF": {
+          "f1": null,
+          "gold": 5,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "POSTAL_CODE": {
+          "f1": null,
+          "gold": 13,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "RELATIVE_NAME": {
+          "f1": null,
+          "gold": 51,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "SGK_NO": {
+          "f1": null,
+          "gold": 11,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "TCKN": {
+          "f1": null,
+          "gold": 96,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "URL": {
+          "f1": null,
+          "gold": 11,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "VEHICLE_ID": {
+          "f1": null,
+          "gold": 2,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        },
+        "VKN": {
+          "f1": null,
+          "gold": 4,
+          "precision": null,
+          "predicted": 0,
+          "recall": 0.0,
+          "true_positives": 0
+        }
+      },
+      "recall_by_split": {
+        "adversarial": 0.0,
+        "dev": 0.0,
+        "sight_unseen": 0.0
+      },
+      "sight_unseen_recall_drop": 0.0
+    },
+    "documents": 190,
+    "medical_terms": {
+      "annotated": {
+        "denominator": "per-document allowlist_terms annotations",
+        "fp_rate": 0.0,
+        "masked": 0,
+        "total": 1293
+      },
+      "fp_rate": 0.0,
+      "fp_rate_annotated": 0.0,
+      "fp_rate_vocabulary": 0.0,
+      "gate_reads": "fp_rate_annotated",
+      "masked": 0,
+      "total": 1293,
+      "vocabulary": {
+        "denominator": "every eval/allowlist/*.txt term occurring in the corpus",
+        "fp_rate": 0.0,
+        "masked": 0,
+        "total": 2051
+      }
+    }
+  },
+  "detector_name": "null",
+  "eval_sha": "uncommitted",
+  "gates": {
+    "checksum_id_precision": {
+      "applicable": false,
+      "direction": "floor",
+      "enforceable": false,
+      "observed": null,
+      "pass": null,
+      "reason": "a checksum-valid ID is never a false positive; the denominator is spans a checksum ACTUALLY VALIDATED, not spans carrying a checksum-validatable label",
+      "threshold": 1.0,
+      "unenforceable_because": "no span in this run was checksum-validated, so precision over them is undefined. This is UNMEASURABLE BY CONSTRUCTION on this corpus, not a detector result: I8 forbids a checksum-valid Turkish ID from existing in the repository, so all 128 eleven-digit runs in the gold set fail their check digits and every TCKN escalates at confidence 0.50 with Merged::is_protected() unarmed. The protection path is exercised instead by core/tests/checksum_protection_armed.rs, which generates checksum-valid identifiers AT RUNTIME and never writes them to disk. See ADR D-030.",
+      "verdict": "UNENFORCEABLE"
+    },
+    "contextual_reid_rate_max": {
+      "applicable": false,
+      "direction": "ceiling",
+      "enforceable": false,
+      "observed": null,
+      "pass": null,
+      "reason": "L6 red team, PIPELINE masker only; unenforceable means UNVALIDATED, not passing",
+      "threshold": 0.05,
+      "unenforceable_because": "no L6 red-team report with matching provenance exists, so the contextual tier is UNVALIDATED for this run. Either no report exists, or the report was produced against a REFERENCE masker (null/leaky/oracle) or against a different detector or eval_sha. Absence of an attack is not a survived attack, and somebody else's attack is not this run's result - see contextual.reid_rate_provenance in the artifact for which of those applies. ADR D-029.",
+      "verdict": "UNENFORCEABLE"
+    },
+    "document_leak_rate_max": {
+      "applicable": true,
+      "direction": "ceiling",
+      "enforceable": true,
+      "observed": 1.0,
+      "pass": false,
+      "reason": "documents with >= 1 missed direct identifier, over documents that hold a direct identifier at all",
+      "threshold": 0.02,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "medical_term_fp_rate_max": {
+      "applicable": true,
+      "direction": "ceiling",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": true,
+      "reason": "masking a medical term destroys the note; the gate reads the WORSE of fp_rate_annotated and fp_rate_vocabulary, and fails if EITHER denominator breaches the threshold",
+      "threshold": 0.005,
+      "unenforceable_because": null,
+      "verdict": "PASS"
+    },
+    "micro_f1_direct": {
+      "applicable": false,
+      "direction": "floor",
+      "enforceable": false,
+      "observed": null,
+      "pass": null,
+      "reason": "Stubbs et al. 2015 accepted bar",
+      "threshold": 0.95,
+      "unenforceable_because": "F1 requires precision, and precision over an EMPTY PREDICTION SET is undefined. A detector that predicts no direct identifier at all therefore cannot fail this gate. Read the per-entity recall table instead: it has a gold-span denominator and does report 0.0.",
+      "verdict": "UNENFORCEABLE"
+    },
+    "recall.ACCOUNT_NO": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.ADDRESS_CITY": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.95,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.ADDRESS_DISTRICT": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.96,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.ADDRESS_STREET": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.AGE_OVER_89": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.97,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.BIOMETRIC_ID": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.CERTIFICATE_NO": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.CLINICIAN_NAME": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.DATE_ADMISSION": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.97,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.DATE_BIRTH": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.DATE_DEATH": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.97,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.DATE_DISCHARGE": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.97,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.DEVICE_ID": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.EMAIL": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.FACILITY_NAME": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.96,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.HEALTH_PLAN_ID": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.IBAN": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.IP_ADDRESS": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.LICENSE_PLATE": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.MRN": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.OTHER_UNIQUE_ID": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.PASSPORT_NO": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.PATIENT_NAME": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.PHONE": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.PHOTO_REF": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.96,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.POSTAL_CODE": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.97,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.RELATIVE_NAME": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.SGK_NO": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.TCKN": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.URL": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.VEHICLE_ID": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall.VKN": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "per-entity recall floor",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "recall_direct_critical": {
+      "applicable": true,
+      "direction": "floor",
+      "enforceable": true,
+      "observed": 0.0,
+      "pass": false,
+      "reason": "HIPAA-critical direct identifiers (NAME, ID, CONTACT)",
+      "threshold": 0.98,
+      "unenforceable_because": null,
+      "verdict": "FAIL"
+    },
+    "sight_unseen_recall_drop_max": {
+      "applicable": false,
+      "direction": "ceiling",
+      "enforceable": false,
+      "observed": null,
+      "pass": null,
+      "reason": "generalisation loss on a held-out note type",
+      "threshold": 0.05,
+      "unenforceable_because": "dev recall is zero or absent, so a drop measured from it is vacuous: 0.0 - 0.0 = 0.0 would PASS a robustness gate for a system that detects nothing",
+      "verdict": "UNENFORCEABLE"
+    }
+  },
+  "gates_summary": {
+    "all_gates_passed": false,
+    "failed": 34,
+    "note": "all_gates_passed is false whenever any gate is unenforceable. Zero failures is not the same as full coverage: an unenforceable gate was not evaluated, so it cannot have been met.",
+    "passed": 1,
+    "total": 39,
+    "unenforceable": 4
+  },
+  "language": [
+    "tr"
+  ],
+  "medical_register": [
+    "la",
+    "en"
+  ],
+  "medical_term_fp_rate": 0.0,
+  "medical_term_fp_rate_annotated": 0.0,
+  "medical_term_fp_rate_vocabulary": 0.0,
+  "metrics": [
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Micro F1 (direct identifiers, relaxed)",
+      "metric_type": "f1",
+      "metric_value": null,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Micro recall (direct identifiers, relaxed)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Micro precision (direct identifiers, relaxed)",
+      "metric_type": "precision",
+      "metric_value": null,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Micro F1 (direct identifiers, strict)",
+      "metric_type": "f1",
+      "metric_value": null,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Document leak rate (over documents holding a direct identifier)",
+      "metric_type": "leak_rate",
+      "metric_value": 1.0,
+      "note": "164 of 164 documents that hold at least one direct gold span. 26 of 190 documents are excluded because they hold no direct identifier and therefore cannot leak one. This is the gated number.",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Document leak rate (over all documents)",
+      "metric_type": "leak_rate",
+      "metric_value": 0.8631578947368421,
+      "note": "Denominator includes documents with no direct identifier, which cannot leak. Reported for completeness; not the gated number.",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Checksum-validated ID precision",
+      "metric_type": "precision",
+      "metric_value": null,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Medical-term false-positive rate",
+      "metric_type": "false_positive_rate",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Sight-unseen recall drop",
+      "metric_type": "recall_drop",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Contextual coverage (DIAGNOSTIC ONLY)",
+      "metric_type": "coverage",
+      "metric_value": 0.0,
+      "note": "Not a validated score. Quasi-identifiers are not scored by F1; the authoritative contextual number is the red-team re-ID rate.",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Contextual re-ID rate (red-team validated)",
+      "metric_type": "reid_rate",
+      "metric_value": null,
+      "note": "null means the contextual tier is UNVALIDATED, not that it passed.",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (ACCOUNT_NO)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (ADDRESS_CITY)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (ADDRESS_DISTRICT)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (ADDRESS_STREET)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (AGE_OVER_89)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (BIOMETRIC_ID)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (CERTIFICATE_NO)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (CLINICIAN_NAME)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (DATE_ADMISSION)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (DATE_BIRTH)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (DATE_DEATH)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (DATE_DISCHARGE)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (DEVICE_ID)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (EMAIL)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (FACILITY_NAME)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (HEALTH_PLAN_ID)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (IBAN)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (IP_ADDRESS)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (LICENSE_PLATE)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (MRN)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (OTHER_UNIQUE_ID)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (PASSPORT_NO)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (PATIENT_NAME)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (PHONE)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (PHOTO_REF)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (POSTAL_CODE)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (RELATIVE_NAME)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (SGK_NO)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (TCKN)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (URL)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (VEHICLE_ID)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    },
+    {
+      "dataset_name": "TurkDeID-Bench",
+      "dataset_type": "deid-tr/TurkDeID-Bench",
+      "metric_name": "Recall (VKN)",
+      "metric_type": "recall",
+      "metric_value": 0.0,
+      "note": "",
+      "task_name": "PHI/PII de-identification (Turkish clinical text)",
+      "task_type": "token-classification",
+      "verified": false
+    }
+  ],
+  "model_name": null,
+  "per_entity_detail": {
+    "ACCOUNT_NO": {
+      "f1": null,
+      "gold": 5,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "ADDRESS_CITY": {
+      "f1": null,
+      "gold": 42,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "ADDRESS_DISTRICT": {
+      "f1": null,
+      "gold": 45,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "ADDRESS_STREET": {
+      "f1": null,
+      "gold": 42,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "AGE_OVER_89": {
+      "f1": null,
+      "gold": 22,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "BIOMETRIC_ID": {
+      "f1": null,
+      "gold": 3,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "CERTIFICATE_NO": {
+      "f1": null,
+      "gold": 5,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "CLINICIAN_NAME": {
+      "f1": null,
+      "gold": 231,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "DATE_ADMISSION": {
+      "f1": null,
+      "gold": 155,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "DATE_BIRTH": {
+      "f1": null,
+      "gold": 90,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "DATE_DEATH": {
+      "f1": null,
+      "gold": 6,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "DATE_DISCHARGE": {
+      "f1": null,
+      "gold": 24,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "DEVICE_ID": {
+      "f1": null,
+      "gold": 15,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "EMAIL": {
+      "f1": null,
+      "gold": 29,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "FACILITY_NAME": {
+      "f1": null,
+      "gold": 83,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "HEALTH_PLAN_ID": {
+      "f1": null,
+      "gold": 11,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "IBAN": {
+      "f1": null,
+      "gold": 6,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "IP_ADDRESS": {
+      "f1": null,
+      "gold": 8,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "LICENSE_PLATE": {
+      "f1": null,
+      "gold": 8,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "MRN": {
+      "f1": null,
+      "gold": 153,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "OTHER_UNIQUE_ID": {
+      "f1": null,
+      "gold": 11,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "PASSPORT_NO": {
+      "f1": null,
+      "gold": 3,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "PATIENT_NAME": {
+      "f1": null,
+      "gold": 249,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "PHONE": {
+      "f1": null,
+      "gold": 99,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "PHOTO_REF": {
+      "f1": null,
+      "gold": 5,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "POSTAL_CODE": {
+      "f1": null,
+      "gold": 13,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "RELATIVE_NAME": {
+      "f1": null,
+      "gold": 51,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "SGK_NO": {
+      "f1": null,
+      "gold": 11,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "TCKN": {
+      "f1": null,
+      "gold": 96,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "URL": {
+      "f1": null,
+      "gold": 11,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "VEHICLE_ID": {
+      "f1": null,
+      "gold": 2,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    },
+    "VKN": {
+      "f1": null,
+      "gold": 4,
+      "precision": null,
+      "predicted": 0,
+      "recall": 0.0,
+      "true_positives": 0
+    }
+  },
+  "per_entity_recall": {
+    "ACCOUNT_NO": 0.0,
+    "ADDRESS_CITY": 0.0,
+    "ADDRESS_DISTRICT": 0.0,
+    "ADDRESS_STREET": 0.0,
+    "AGE_OVER_89": 0.0,
+    "BIOMETRIC_ID": 0.0,
+    "CERTIFICATE_NO": 0.0,
+    "CLINICIAN_NAME": 0.0,
+    "DATE_ADMISSION": 0.0,
+    "DATE_BIRTH": 0.0,
+    "DATE_DEATH": 0.0,
+    "DATE_DISCHARGE": 0.0,
+    "DEVICE_ID": 0.0,
+    "EMAIL": 0.0,
+    "FACILITY_NAME": 0.0,
+    "HEALTH_PLAN_ID": 0.0,
+    "IBAN": 0.0,
+    "IP_ADDRESS": 0.0,
+    "LICENSE_PLATE": 0.0,
+    "MRN": 0.0,
+    "OTHER_UNIQUE_ID": 0.0,
+    "PASSPORT_NO": 0.0,
+    "PATIENT_NAME": 0.0,
+    "PHONE": 0.0,
+    "PHOTO_REF": 0.0,
+    "POSTAL_CODE": 0.0,
+    "RELATIVE_NAME": 0.0,
+    "SGK_NO": 0.0,
+    "TCKN": 0.0,
+    "URL": 0.0,
+    "VEHICLE_ID": 0.0,
+    "VKN": 0.0
+  },
+  "run_id": "20260719T232807Z-null",
+  "schema_sha": "092169a60dd1c9754b0ade129419c3ad2db4cc407bb416e27672733dfe67eb09",
+  "schema_version": "1.0.0",
+  "thresholds_sha": "1d107ec9999021640ca7dc36684638eeaa7a5d49e9152df39d013e22dc3e91f8",
+  "tier": "safe_harbor",
+  "timestamp_utc": "2026-07-19T23:28:07.238053+00:00",
+  "unenforceable_gates": [
+    {
+      "direction": "floor",
+      "gate": "micro_f1_direct",
+      "threshold": 0.95,
+      "why": "F1 requires precision, and precision over an EMPTY PREDICTION SET is undefined. A detector that predicts no direct identifier at all therefore cannot fail this gate. Read the per-entity recall table instead: it has a gold-span denominator and does report 0.0."
+    },
+    {
+      "direction": "floor",
+      "gate": "checksum_id_precision",
+      "threshold": 1.0,
+      "why": "no span in this run was checksum-validated, so precision over them is undefined. This is UNMEASURABLE BY CONSTRUCTION on this corpus, not a detector result: I8 forbids a checksum-valid Turkish ID from existing in the repository, so all 128 eleven-digit runs in the gold set fail their check digits and every TCKN escalates at confidence 0.50 with Merged::is_protected() unarmed. The protection path is exercised instead by core/tests/checksum_protection_armed.rs, which generates checksum-valid identifiers AT RUNTIME and never writes them to disk. See ADR D-030."
+    },
+    {
+      "direction": "ceiling",
+      "gate": "contextual_reid_rate_max",
+      "threshold": 0.05,
+      "why": "no L6 red-team report with matching provenance exists, so the contextual tier is UNVALIDATED for this run. Either no report exists, or the report was produced against a REFERENCE masker (null/leaky/oracle) or against a different detector or eval_sha. Absence of an attack is not a survived attack, and somebody else's attack is not this run's result - see contextual.reid_rate_provenance in the artifact for which of those applies. ADR D-029."
+    },
+    {
+      "direction": "ceiling",
+      "gate": "sight_unseen_recall_drop_max",
+      "threshold": 0.05,
+      "why": "dev recall is zero or absent, so a drop measured from it is vacuous: 0.0 - 0.0 = 0.0 would PASS a robustness gate for a system that detects nothing"
+    }
+  ]
+}

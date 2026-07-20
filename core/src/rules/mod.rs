@@ -12,9 +12,18 @@
 //! WHY NORMALISATION IS SEPARATE FROM MATCHING: the brief names full-width and
 //! non-ASCII digits as a failure mode, and the obvious fix -- rewrite the
 //! document and match on the rewrite -- silently breaks the offset contract,
-//! because `１` is three bytes and `1` is one. [`Doc`] keeps both strings and a
-//! per-byte index from the normalised form back to the ORIGINAL, so every span
-//! this layer emits is anchored to bytes the caller actually holds.
+//! because `１` is three bytes and `1` is one. [`Doc`] keeps both strings and an
+//! index from the matching form back to the ORIGINAL, so every span this layer
+//! emits is anchored to bytes the caller actually holds.
+//!
+//! WHY THERE IS EXACTLY ONE NORMALISER: [`Doc`] does not implement its own. It
+//! is a thin wrapper over [`crate::text::Skeleton`], which folds digit systems,
+//! neutralises zero-width characters and bidi controls, folds exotic spaces to
+//! ASCII space and folds homoglyphs onto Latin -- in ONE pass over ONE index.
+//! Running a second normaliser after it would mean two offset maps that stack
+//! rather than compose, which is the bug class the offset index exists to close.
+//! A digit-folding-only `Doc` is why a TCKN split by a soft hyphen or a
+//! zero-width joiner used to reach L4 as nothing at all.
 
 mod date;
 mod email;
@@ -31,6 +40,7 @@ use regex::Regex;
 
 use crate::label::EntityLabel;
 use crate::span::{DetectorId, Span};
+use crate::text::{Fold, Skeleton};
 
 /// Confidence for a format whose type has NO checksum in existence.
 ///
@@ -71,67 +81,33 @@ fn compiled(cell: &'static OnceLock<Option<Regex>>, pattern: &str) -> Option<&'s
 
 /// A document in both the form the caller holds and the form the rules match.
 ///
-/// `origin` has one entry per byte of `normalized`, plus a terminating entry:
-/// `origin[i]` is the byte offset in `original` of the character whose
-/// normalised form begins at byte `i`. Because every entry names the START of
-/// an original character, a normalised offset always maps to a valid UTF-8
-/// character boundary in the original -- which is the property [`Span::new`]
-/// refuses to build a span without.
+/// A THIN WRAPPER, deliberately: the matching buffer and the index back to the
+/// original are [`Skeleton`]'s, not this type's. What `Doc` adds is the two
+/// emit constructors, which are the only sanctioned way for an offset found in
+/// the matching buffer to become a [`Span`] -- so a rule module cannot build a
+/// span against skeleton offsets even by accident.
 pub(crate) struct Doc<'a> {
-    original: &'a str,
-    normalized: String,
-    origin: Vec<usize>,
-}
-
-/// Map one character to its ASCII decimal equivalent.
-///
-/// Explicit ranges rather than `char::to_digit`, which is ASCII-only, and
-/// rather than a general Unicode decomposition, which would also fold letters
-/// and change the shape of the very tokens the rules key on.
-fn ascii_digit(ch: char) -> Option<char> {
-    let value = match ch {
-        '0'..='9' => return Some(ch),
-        // Fullwidth forms, which is how a digit arrives from a CJK-locale IME
-        // or a badly transcoded hospital export.
-        '\u{FF10}'..='\u{FF19}' => ch as u32 - 0xFF10,
-        // Arabic-Indic and its Extended (Persian/Urdu) variant.
-        '\u{0660}'..='\u{0669}' => ch as u32 - 0x0660,
-        '\u{06F0}'..='\u{06F9}' => ch as u32 - 0x06F0,
-        // Devanagari, present in multilingual EHR exports.
-        '\u{0966}'..='\u{096F}' => ch as u32 - 0x0966,
-        _ => return None,
-    };
-    char::from_digit(value, 10)
+    skeleton: Skeleton<'a>,
 }
 
 impl<'a> Doc<'a> {
     pub(crate) fn new(original: &'a str) -> Self {
-        let mut normalized = String::with_capacity(original.len());
-        let mut origin = Vec::with_capacity(original.len() + 1);
-        for (offset, ch) in original.char_indices() {
-            normalized.push(ascii_digit(ch).unwrap_or(ch));
-            // Every byte of the normalised character anchors to the START of
-            // the original character. A three-byte `１` collapses to a
-            // one-byte `1` and a two-byte `ş` stays two bytes; in both cases
-            // the mapped offset is where the original character begins.
-            origin.resize(normalized.len(), offset);
-        }
-        origin.push(original.len());
         Self {
-            original,
-            normalized,
-            origin,
+            // Fold::Skeleton and not Fold::Compose: the evasions this layer has
+            // to survive are the ones that split a digit run without changing
+            // what a human reads, and only the full fold neutralises them.
+            skeleton: Skeleton::new(original, Fold::Skeleton),
         }
     }
 
-    /// The text the rules match against: digits ASCII, everything else intact.
+    /// The text the rules match against. NEVER emitted as document text.
     pub(crate) fn text(&self) -> &str {
-        &self.normalized
+        self.skeleton.text()
     }
 
-    /// Re-anchor a normalised range onto the original document.
+    /// Re-anchor a matching-buffer range onto the original document.
     fn anchor(&self, start: usize, end: usize) -> Option<(usize, usize)> {
-        Some((*self.origin.get(start)?, *self.origin.get(end)?))
+        self.skeleton.original_range(start, end)
     }
 
     /// Emit an unvalidated candidate at the given confidence.
@@ -150,7 +126,7 @@ impl<'a> Doc<'a> {
     ) -> Option<Span> {
         let (start, end) = self.anchor(start, end)?;
         Span::new(
-            self.original,
+            self.skeleton.original(),
             start,
             end,
             label,
@@ -172,7 +148,7 @@ impl<'a> Doc<'a> {
         label: EntityLabel,
     ) -> Option<Span> {
         let (start, end) = self.anchor(start, end)?;
-        Span::checksum_validated(self.original, start, end, label).ok()
+        Span::checksum_validated(self.skeleton.original(), start, end, label).ok()
     }
 }
 
@@ -409,6 +385,81 @@ mod tests {
             .expect("an Arabic-Indic TCKN must be detected");
         assert!(found.is_checksum_validated());
         assert_eq!(&doc[found.start()..found.end()], arabic);
+    }
+
+    /// Every character class that used to split a digit run past this layer.
+    ///
+    /// ONE TEST PER CLASS RATHER THAN ONE OVER A LIST, in a loop that names the
+    /// code point in the failure message: each of these was independently
+    /// measured as `masked=false, spans=0` against the live pipeline, and a
+    /// single aggregated assertion would let four of them regress silently
+    /// while the fifth kept the test green.
+    ///
+    /// NBSP is here with the others even though it is FOLDED to an ASCII space
+    /// rather than dropped -- the fold has to leave the digit run contiguous, or
+    /// a note pasted out of a word processor loses its national ID.
+    #[test]
+    fn an_invisible_character_inside_an_id_does_not_hide_it_from_this_layer() {
+        let tckn = valid_tckn([4, 8, 2, 0, 0, 0, 0, 0, 1]);
+        for (name, separator) in [
+            ("U+200D ZERO WIDTH JOINER", '\u{200D}'),
+            ("U+00AD SOFT HYPHEN", '\u{00AD}'),
+            ("U+200B ZERO WIDTH SPACE", '\u{200B}'),
+            ("U+FEFF BYTE ORDER MARK", '\u{FEFF}'),
+            ("U+00A0 NO-BREAK SPACE", '\u{00A0}'),
+            ("U+2060 WORD JOINER", '\u{2060}'),
+        ] {
+            let split = format!("{}{separator}{}", &tckn[..4], &tckn[4..]);
+            let doc = format!("T.C. Kimlik No: {split}\nServis: Kardiyoloji");
+            let found = RuleSet
+                .detect(&doc)
+                .into_iter()
+                .find(|s| s.label() == EntityLabel::Tckn)
+                .unwrap_or_else(|| panic!("{name} hid the identifier from L1"));
+            assert!(
+                found.is_checksum_validated(),
+                "{name} lost the checksum flag"
+            );
+            assert_eq!(
+                &doc[found.start()..found.end()],
+                split,
+                "{name}: the span must cover the ORIGINAL bytes, interior \
+                 invisible character included, or L5 leaves a fragment behind"
+            );
+            assert!(doc.is_char_boundary(found.start()) && doc.is_char_boundary(found.end()));
+        }
+    }
+
+    #[test]
+    fn a_bidi_wrapper_neither_hides_an_id_nor_gets_swallowed_by_its_span() {
+        // The already-passing class, asserted here so the integration cannot
+        // regress it: the overrides sit at the EDGES of the run, so they must
+        // stay OUTSIDE the span even though the matcher never sees them.
+        let tckn = valid_tckn([6, 1, 2, 3, 4, 5, 6, 7, 8]);
+        let doc = format!("Kimlik: \u{202E}{tckn}\u{202C} kaydı açıldı.");
+        let found = RuleSet
+            .detect(&doc)
+            .into_iter()
+            .find(|s| s.label() == EntityLabel::Tckn)
+            .expect("a bidi-wrapped id must be detected");
+        assert!(found.is_checksum_validated());
+        assert_eq!(&doc[found.start()..found.end()], tckn);
+    }
+
+    #[test]
+    fn the_four_turkish_i_letters_survive_the_layers_normalisation() {
+        // I6's signal, checked at the layer that now owns the fold. `İ` U+0130
+        // decomposes under NFD to `I` + U+0307 and `ı` U+0131 does not
+        // decompose at all, so any decomposing step followed by any
+        // mark-dropping step collapses two of the four into one and the
+        // strongest name signal in Turkish is gone.
+        let doc = Doc::new("İIıi İnci Işık ılık için");
+        assert_eq!(doc.text(), "İIıi İnci Işık ılık için");
+        let distinct: std::collections::BTreeSet<char> = doc.text().chars().take(4).collect();
+        assert_eq!(distinct.len(), 4, "two of the four i letters collapsed");
+        // And a decomposed note is put back together rather than stripped: the
+        // wrong direction would leave a bare `I`, which is the capital of `ı`.
+        assert_eq!(Doc::new("I\u{0307}zmir").text(), "İzmir");
     }
 
     #[test]

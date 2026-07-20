@@ -106,10 +106,12 @@ name = "deid-tr-cli"
 version = "0.1.0"
 dependencies = [
  "deid-tr-core",
+ "deid-tr-files",
  "getrandom 0.3.4",
  "minisign",
  "minisign-verify",
  "reqwest",
+ "serde_json",
  "sha2",
  "thiserror",
 ]
@@ -128,6 +130,14 @@ version = "0.1.0"
 dependencies = [
  "deid-tr-core",
  "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "deid-tr-files"
+version = "0.1.0"
+dependencies = [
+ "deid-tr-core",
  "thiserror",
 ]
 
@@ -153,6 +163,16 @@ name = "deid-tr-ort"
 version = "0.1.0"
 dependencies = [
  "deid-tr-core",
+ "thiserror",
+]
+
+[[package]]
+name = "deid-tr-service"
+version = "0.1.0"
+dependencies = [
+ "deid-tr-core",
+ "getrandom 0.3.4",
+ "serde_json",
  "thiserror",
 ]
 

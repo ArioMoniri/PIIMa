@@ -42,16 +42,24 @@ pub mod context;
 pub mod detect;
 pub mod error;
 pub mod label;
+pub mod output;
 pub mod pipeline;
+pub mod redact;
 pub mod route;
 pub mod rules;
 pub mod span;
 pub mod surrogate;
+pub mod text;
 
 pub use error::{Error, Result};
 pub use label::{EntityLabel, QuasiCategory};
+pub use output::{EntityRow, HtmlOptions, Report};
 pub use pipeline::{
     Contextual, DeidResult, Detector, MappedSpan, Pipeline, RuleSet, Tier, Tokenizer,
+};
+pub use redact::{
+    Blackout, HashKey, RedactError, Redacted, RedactedSpan, RedactionMethod, RedactionPolicy,
+    Redactor, Rendered,
 };
 // The allowlist and the surrogate engine are re-exported from the layers that
 // OWN them, not from `pipeline`. `pipeline` used to define a stub of each under

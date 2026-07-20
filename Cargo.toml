@@ -2,9 +2,11 @@
 resolver = "2"
 members = [
     "bindings/cli",
+    "bindings/files",
     "bindings/llm",
     "bindings/mcp",
     "bindings/ort",
+    "bindings/service",
     "bindings/wasm",
     "core",
     # An EVAL instrument, not a shipped surface. It runs the real pipeline over

@@ -1,0 +1,47 @@
+[package]
+name = "deid-tr-service"
+description = "deid-serve: a LOCAL HTTP/JSON de-identification service. Binds 127.0.0.1 and refuses every all-interfaces address."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# WHY THERE IS NO HTTP FRAMEWORK HERE.
+#
+# Two reasons, and the second is the one that matters.
+#
+# 1. OFFLINE BUILDABILITY. `just test-airgapped` is a release gate. Every crate
+#    named below is already resolved in the workspace lock file, so this package
+#    can be added without cargo touching the registry. axum/hyper/tokio are not,
+#    and acquiring them is the one thing bindings/python is excluded from the
+#    workspace to avoid (see the root Cargo.toml). A dependency that forces a
+#    resolve is a dependency that breaks the air-gapped build.
+#
+# 2. I3 IS THE PRODUCT HERE. This crate exists to be the surface an operator
+#    exposes, so the bind address must be decided in ONE reviewable function
+#    that a test can call directly with every hostile input. A framework hides
+#    that decision behind a builder that accepts a string, and the incumbent's
+#    shipped compose file publishes on all host interfaces precisely because the
+#    bind address was a configuration value rather than a checked one. `bind.rs`
+#    is ~150 lines and it is the whole security argument; `http.rs` is a
+#    deliberately small HTTP/1.1 subset (no keep-alive, no chunked bodies, no
+#    upgrades) because every feature a server does not implement is a feature it
+#    cannot be attacked through.
+#
+# NOT A DEPENDENCY, permanently: any telemetry, analytics, crash-reporting or
+# metrics crate, and any outbound HTTP client. This process holds span maps --
+# the literal table from surrogate back to real PHI -- and it holds them safely
+# only because it has no way to send one anywhere. It accepts connections; it
+# never makes one.
+[dependencies]
+deid-tr-core = { path = "../../core" }
+# CSPRNG for session handles and for the L5 salt. A session handle is a bearer
+# capability over a span map, so it comes from the OS entropy source and never
+# from a counter, a clock, or a hash of either.
+getrandom = "0.3"
+serde_json = "1"
+thiserror = "2"
+
+[[bin]]
+name = "deid-serve"
+path = "src/main.rs"

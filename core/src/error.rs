@@ -141,6 +141,45 @@ pub enum Error {
     /// L5 could not produce a surrogate for a masked span.
     #[error("surrogate assignment failed ({kind})")]
     SurrogateFailed { kind: SurrogateFailure },
+
+    /// The configured redaction policy named a method the pipeline is not
+    /// equipped for.
+    ///
+    /// An error rather than a fallback, for the reason
+    /// [`crate::redact::RedactError::HashKeyRequired`] gives: quietly applying
+    /// a different method than the policy names produces plausible output that
+    /// no audit can catch.
+    #[error("redaction failed ({kind})")]
+    RedactionFailed { kind: RedactionFailure },
+}
+
+/// Why a redaction method could not be applied.
+///
+/// A closed vocabulary, so no document-derived string reaches a log through
+/// this path (I4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum RedactionFailure {
+    /// The policy selected `Hash` and no key was installed.
+    HashKeyRequired,
+    /// The policy selected `Surrogate` or `DateShift` and no L5 engine was
+    /// installed.
+    SurrogateEngineRequired,
+    /// The caller's hash key material was below the accepted width.
+    HashKeyTooShort,
+    /// A blackout shape the redactor refuses to build.
+    BlackoutRejected,
+}
+
+impl core::fmt::Display for RedactionFailure {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::HashKeyRequired => "hash key required",
+            Self::SurrogateEngineRequired => "surrogate engine required",
+            Self::HashKeyTooShort => "hash key material too short",
+            Self::BlackoutRejected => "blackout shape rejected",
+        })
+    }
 }
 
 /// Why L2 could not turn a detector's output into spans.

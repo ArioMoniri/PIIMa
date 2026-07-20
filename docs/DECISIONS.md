@@ -1498,3 +1498,292 @@ test passed and the product did not have the behaviour.
 - The CLI and the gateway still cannot mask a name, because nothing in them proposes a name span.
   This ADR does not change that and their tests say so in their headers rather than pretending
   otherwise.
+
+---
+
+## D-032 — Two redaction methods, not six: surrogates by default, bracketed placeholders as a named opt-out
+
+- **Date:** 2026-07-20
+- **Status:** ACCEPTED
+
+**Context.** OpenMed exposes six redaction methods (`mask`, `remove`, `replace`, `hash`,
+`shift_dates`, `format_preserve`) and lets the caller pick per call. Reviewing that menu while
+writing `docs/COMPARISON.md` forced the question of which of them deid-tr should offer.
+
+**Decision.** deid-tr offers exactly two ways to rewrite a masked span, and the choice is a policy
+setting rather than a per-call parameter:
+
+1. **Format-preserving surrogates (L5), the default** on every binding (D-031).
+2. **Bracketed type placeholders**, reached only through an opt-out whose name states the cost:
+   `--placeholder-labels` / `label_placeholders=True` / `deidentifyWithLabelPlaceholders`.
+
+`remove`, `hash` and a separately selectable `shift_dates` are REJECTED as product surface.
+Date shifting is not a method; it is what the L5 date surrogate already does, and it is not
+separately selectable because a caller who shifts dates while leaving names to a different method
+has produced a document with two different privacy properties in it.
+
+**Alternatives considered.**
+1. Match the six-method menu. Maximum flexibility, and the shape a user migrating from OpenMed
+   expects.
+2. Surrogates only, with no opt-out at all. Simplest, and the strongest default.
+3. The chosen two.
+
+**Rationale.** Each rejected method is rejected for a specific reason, not for tidiness.
+`remove` deletes bytes, which destroys the positional alignment between the original and the
+output — and the span map that makes the M2 gateway's round trip possible (D-025) is exactly that
+alignment. `hash` is deterministic across documents by construction, which is a **cross-document
+linkage primitive**: the same patient hashes to the same token in every note, so an attacker holding
+two de-identified corpora can join them on a column we handed them. That is one of the seven L6
+attack classes we grade ourselves against, and shipping a menu item that guarantees it is
+indefensible. A per-call method parameter is itself a hazard: the safest configuration must not be
+one of six equally-presented options, because the option list is where a caller optimises for
+readability under deadline. Option 2 was rejected because placeholder output is genuinely needed —
+for human review of what was masked, and for consumers that cannot tolerate plausible-looking fake
+data — and forbidding it would push callers to post-process our surrogates back into labels, worse
+and unmeasured.
+
+**Consequences.**
+- We are less flexible than OpenMed here, and a migrating user loses four methods. `docs/COMPARISON.md`
+  section 3.2 marks this `partial` rather than dressing it as a feature.
+- Losing `hash` costs a legitimate use case: longitudinal cohort assembly across notes. The
+  replacement is the salted, within-document-consistent surrogate plus the span map held locally by
+  the data owner — which is more work for the data owner and is the correct place for that work.
+- Placeholder output remains reachable, so the failure mode where a caller ships `[PATIENT_NAME]`
+  into a downstream parser that expected a name still exists. It is now at least named at the call
+  site.
+- The two methods must both be evaluated. A surrogate that leaks through its own shape is a
+  measured defect, not a hypothetical one — see D-028, where `DATE_DEATH` surrogate length
+  correlates r = 1.0000 with the original.
+
+---
+
+## D-033 — True PDF redaction removes the content stream, and REFUSES a scanned page rather than drawing over it
+
+- **Date:** 2026-07-20
+- **Status:** ACCEPTED
+
+**Context.** A PDF carries a text layer and a rendered appearance. The overwhelmingly common
+"redaction" bug in the wild is to draw an opaque rectangle over a name and save: the glyphs are
+still in the content stream, and any text extractor recovers them in full. OpenMed takes this
+seriously — `multimodal/verify_pdf.py` checks a redacted PDF's text layer for leakage — and any
+file-level surface we ship has to decide its own policy before it has any code in it.
+
+**Decision.**
+1. A redacted PDF is produced by **removing the covered glyphs from the content stream** and
+   re-emitting it. A drawn rectangle may accompany that for human legibility; it never substitutes
+   for it.
+2. Document-level metadata (`/Info`, XMP), embedded file attachments, annotations and the
+   incremental-update history are stripped, because a name removed from page 3 is still in the
+   previous revision if the file is saved incrementally.
+3. **The output is verified before it is written**: the text layer of the result is re-extracted and
+   re-scanned, and a run that still finds a masked surface fails rather than writing the file.
+4. **A page with no extractable text layer is REFUSED, not processed.** The tool exits non-zero and
+   names the page. It does not draw boxes on a scanned page, and it does not silently pass the page
+   through.
+
+**Alternatives considered.**
+1. Draw-and-flatten: rasterise every page after drawing the boxes. Genuinely removes the text layer.
+2. Draw boxes only. What most tooling does.
+3. OCR the scanned page ourselves, then redact the recognised regions.
+4. The chosen policy, with refusal on scanned pages.
+
+**Rationale.** Option 2 is a data breach with a progress bar. Option 1 destroys every downstream
+property of the document — selectable text, accessibility, searchability, file size — and it
+converts a text PDF into exactly the scanned page we say we cannot handle. Option 3 is the
+interesting one and it is rejected **for now on an honesty ground, not a technical one**: OCR
+recall on Turkish clinical scans is unknown to us and unmeasured by anything in `eval/`, and a tool
+that OCRs a page and redacts what it recognised produces a document whose privacy is bounded by an
+OCR error rate the user cannot see and we have not published. Refusal is the only response that does
+not make an unmeasured promise. It is also the response that fails LOUDLY, which is the whole
+disposition of I2: the user learns that page needs handling some other way.
+
+**Consequences.**
+- Mixed documents — a typed discharge summary with one scanned consent form appended — are refused
+  as a whole until the user splits them. That is real friction and users will feel it as the tool
+  being broken.
+- We are strictly less capable than OpenMed on scanned documents, which handle them through four OCR
+  engines. `docs/COMPARISON.md` section 3.3 records this as `no`, with the refusal rule named.
+- The verify-before-write step means every redacted PDF is parsed twice, and a PDF whose text layer
+  cannot be re-extracted at all after rewriting fails the run even if the redaction was correct.
+- Rule 4 is only as good as "has an extractable text layer". A page with a thin, near-empty text
+  layer over a scanned image — a common output of some scanner software — will pass the check while
+  behaving like a scan. That gap is real and is not closed by this ADR.
+- None of this masks names, because nothing in this pipeline masks names yet. A PDF surface built
+  today removes rule-detectable identifiers from a PDF and nothing else.
+
+---
+
+## D-034 — NFC and nothing else: no NFKC, no NFD, and the compatibility folds we do want are done explicitly and reversibly
+
+- **Date:** 2026-07-20
+- **Status:** ACCEPTED
+
+**Context.** Text arriving from a file, a clipboard, a DOCX or an HTTP body is not in a canonical
+Unicode form. `Ş` may be one code point (U+015E) or two (`S` + U+0327 COMBINING CEDILLA), and the
+two forms compare unequal, hash unequal, and produce different byte offsets. Separately, the L1
+failure-mode list in the brief names full-width and non-ASCII digits and invisible characters glued
+into identifiers as live evasion vectors, and `core/src/text/digits.rs` and
+`core/src/text/invisible.rs` exist to handle them.
+
+**Decision.**
+1. **Normalisation form is NFC, applied once at the ingestion boundary in `bindings/`, never inside
+   `core/`.** The NFC text is what `core::Pipeline` receives and what every byte offset in a `Span`,
+   a span map or an audit entry refers to. Offsets are never reported against the pre-normalisation
+   bytes.
+2. **NFKC is forbidden.** So is NFD, and so is NFKD.
+3. The two compatibility behaviours we actually want — folding non-ASCII decimal digits to ASCII for
+   checksum evaluation, and neutralising invisible format characters inside a candidate identifier —
+   are performed **explicitly, narrowly and reversibly** by `core/src/text/digits.rs` and
+   `core/src/text/invisible.rs`, over the candidate span only, never over the document.
+4. `Normalization::TurkishDottedI` (`core/src/detect/align.rs`) is unaffected and remains
+   character-for-character with a reversible index. It is a model-input fold, not a document
+   rewrite.
+
+**Alternatives considered.**
+1. No normalisation at all. Zero offset risk; leaves decomposed `Ş` unmatched by every rule and
+   every vocabulary entry.
+2. NFKC, which would fold full-width digits and a great deal else for free.
+3. NFD, so that combining marks are uniform.
+4. NFC plus targeted explicit folds — chosen.
+
+**Rationale.** Option 1 is an evasion vector: an attacker, or merely an unlucky export from a
+hospital system, writes the patient name in decomposed form and every allowlist lookup, surrogate
+key and rule match misses it. Option 2 is rejected because NFKC's mapping table is large,
+open-ended and **clinically destructive**: it rewrites `µ` (U+00B5) to `μ`, `℃` to `°C`, ligatures
+to their parts, and superscripts and subscripts to baseline digits — which silently turns a dosage
+or a formula into different text, in a document whose whole purpose is to stay clinically readable
+after masking. It also changes lengths across an unbounded character set, so every offset in the
+system depends on a table we do not control. Getting full-width-digit folding "for free" is not
+worth buying the rest of that table, especially when the fold we need is a dozen lines and can be
+scoped to the candidate span. Option 3 is rejected because decomposing splits a Turkish letter into
+a base plus a combining mark, which multiplies the number of char boundaries inside every name,
+breaks the "one letter, one boundary" reasoning the span type depends on, and weakens the casing
+signal that I6 says is the strongest name evidence in Turkish.
+
+**Consequences.**
+- NFC is not free: it can change byte length (decomposed input is longer than composed), so the
+  binding that normalises MUST keep the index that maps output offsets back onto the bytes the user
+  actually gave us, or a masked file will be rewritten at the wrong positions. That index is now a
+  correctness dependency of every file surface.
+- Because normalisation happens in `bindings/` and not `core/`, **each binding can forget to do
+  it**, and a binding that forgets has a silent recall hole rather than a compile error. This is the
+  same hazard D-031 records for the allowlist and L5, and it wants the same treatment: a default
+  that is hard to skip.
+- We keep exactly the compatibility problems NFKC would have solved and that we chose not to solve:
+  ligatures, enclosed alphanumerics, and non-ASCII digits appearing anywhere other than inside a
+  candidate identifier are not folded, and a rule that would have matched after NFKC will not match.
+- A document that was already NFKC-normalised upstream reaches us with that damage already done, and
+  we cannot detect it.
+
+---
+
+## D-035 — The REST service binds loopback only; exposure requires a flag, a token and a startup warning, and the container image gets no exception
+
+- **Date:** 2026-07-20
+- **Status:** ACCEPTED
+
+**Context.** I3 forbids binding `0.0.0.0`. `bindings/service` introduces the first deid-tr surface
+that opens a socket at all — the MCP gateway deliberately has none and refuses the flags that would
+imply one (D-026) — so I3 stops being a rule about code nobody writes and becomes a rule about a
+running process.
+
+**Decision.**
+1. The default bind is `127.0.0.1` on an explicit port. `0.0.0.0`, `::`, and any address that is not
+   a loopback address are rejected **at parse time**, not at bind time, and rejected by value rather
+   than by string comparison, so `0.0.0.000`, `0x0.0.0.0`, `[::ffff:0.0.0.0]` and a hostname that
+   resolves off-loopback are all refused.
+2. Exposure beyond loopback requires ALL THREE of: an explicit `--expose` flag, a bearer token
+   supplied by the operator (never generated for them, never defaulted), and a warning printed to
+   stderr at startup naming the address it is listening on.
+3. There is no environment variable that can turn (2) on. A misconfigured deployment environment must
+   not be able to expose a PHI endpoint without someone having typed the flag.
+4. **The container image gets no exception.** Any compose or container file we ship publishes
+   `127.0.0.1:PORT:PORT`, never `PORT:PORT`.
+5. Request and response bodies never enter a log, a metric label, a trace attribute or an error
+   string (I4). Metrics, if enabled at all, are pull-only and labelled by route template and status
+   code.
+
+**Alternatives considered.**
+1. Bind loopback by default and let a plain `--host` flag take any address. The conventional design,
+   and what most services do.
+2. Ship no REST surface at all, on the grounds that a network service holding PHI is a category of
+   risk we do not need.
+3. The chosen three-part gate.
+
+**Rationale.** Option 1 fails in the one direction that matters: `--host 0.0.0.0` is the single most
+copy-pasted line in server documentation, it appears in every "it works in Docker now" answer, and
+it silently converts a local tool into an unauthenticated PHI endpoint on a hospital LAN. Requiring
+three separate deliberate acts means no single copy-paste can do it. Rule 4 exists because it is the
+exact gap in an otherwise careful posture next door: OpenMed's documentation is consistently
+loopback — uvicorn examples use `--host 127.0.0.1`, trusted-host checking is always on, CORS is off
+unless exact origins are listed — and their shipped `docker-compose.yml` publishes on all host
+interfaces anyway, with the docs telling you to change it. That is not a criticism of their
+judgement; it is evidence that the container file is where this rule gets lost, so we name it in the
+ADR rather than trusting ourselves to remember. Option 2 was seriously considered and rejected
+because the alternative to a local REST service is not "no network service" — it is the user standing
+up their own wrapper around the Python binding, with none of these properties.
+
+**Consequences.**
+- Legitimate multi-host deployments are inconvenient by design. A team that wants the service on a
+  cluster must set a token and pass a flag on every start, and they will find this annoying.
+- Rejecting non-loopback addresses at parse time means we must implement address classification
+  ourselves rather than deferring to the OS bind call, and an address family we classify wrongly is
+  a bug in the direction of refusing something valid — the safe direction, but a support burden.
+- A bearer token in a process argument is visible in `ps`. Reading it from a file or stdin is the
+  better shape and this ADR does not settle it.
+- Rule 3 means an operator cannot configure exposure through the same mechanism as everything else,
+  which is genuinely inconsistent configuration design. We accept the inconsistency because the
+  asymmetry is the point.
+- None of this makes the service safe to expose. It makes exposing it a decision someone made.
+
+## D-036 — L1's `Doc` IS the Unicode skeleton; and an exotic space between two digits is dropped, not folded
+
+**Status.** Accepted. Supersedes nothing; completes D-034, which specified the fold but left it
+without a caller.
+
+**Context.** `core/src/text/` implemented the fold, the offset index, the confusable table and the
+invisible-character policy, and its module header presented a four-row table of evasions as
+"handled". Nothing outside the module called it. L1 ran its own normaliser — `rules::mod::Doc` —
+which folded decimal digit systems and nothing else. Measured against the live pipeline with a
+checksum-valid TCKN: fullwidth, Arabic-Indic and bidi-wrapped ids were detected; ids split by
+U+200D, U+00AD, U+200B, U+FEFF or U+00A0 produced zero spans. `recall.TCKN` read 0.9792 against a
+0.98 floor — a failing gate on a checksum-validatable direct identifier, which is an I2 violation.
+
+**Decision.**
+
+1. `rules::mod::Doc` is a thin wrapper over `text::Skeleton` at `Fold::Skeleton`. It owns no
+   normalisation of its own. There is exactly ONE fold and ONE offset index in the crate, because
+   two offset maps that stack instead of compose is the bug class the index exists to close.
+2. An exotic space (U+00A0 and family) BETWEEN TWO DIGITS is dropped from the matching buffer
+   rather than folded to an ASCII space. Everywhere else it is still folded to a space.
+3. The ASCII space is never bridged. `0532 123 45 67` is written that way on purpose, and
+   tolerating a real space inside an identifier is a rule-module decision, not a normaliser's.
+4. `route::allowlist::MedicalAllowlist::lookup` refuses every mixed-script token, wiring
+   `text::is_mixed_script` into the one place it was written for.
+
+**Rationale.** (2) is the only part that is not mechanical. The stated reason exotic spaces are
+folded rather than deleted is that they SEPARATE TOKENS, and deleting one glues `Ayşe` to `Yılmaz`
+into a token no gazetteer has seen. Two digits of one number are not two tokens: a NO-BREAK SPACE
+between them is what a word processor inserts precisely to say "do not wrap here", and a PDF text
+extractor hands it through mid-identifier. Folding it to a space there splits an eleven-digit run
+into four and seven, which is a missed national ID — a breach, against a papercut on the other side.
+(4) is I2's precedence rule made executable: `carcinom` + Cyrillic `а` folds onto a real allowlist
+term, so without the check the fold would hand an attacker a deterministic `Keep` for anything they
+can disguise. Refusing the entry masks nothing by itself; it withdraws the short-circuit so the span
+reaches the adjudicator on its own evidence.
+
+**Consequences.**
+- `recall.TCKN` 0.9792 -> 1.0000, strict and relaxed. No other entity's recall moved in either
+  direction; micro relaxed recall 0.3888 -> 0.3901, micro precision 0.8859 -> 0.8863,
+  medical-term FP rate unchanged at 0.0000 annotated / 0.000488 vocabulary.
+- Every L1 span now travels through `Skeleton::original_range`, which refuses a mid-character
+  offset rather than rounding it. A rule that produced one used to get a truncated span; it now
+  gets no span. That is the safe direction but it is a behaviour change.
+- The confusable fold is now live in L1, so a homoglyph can make a rule match where it did not
+  before. Precision on the committed corpus did not move, but this is a real widening.
+- A digit run bridged across an NBSP means a European thousands separator (`10 000 000` written
+  with U+00A0) reads as one long run. Only checksum-PASSING windows are emitted from such a run,
+  so the exposure is the ~1% of random eleven-digit windows that pass — accepted under I2.
+- `Fold::Compose`, `Skeleton::original_slice`, `invisible::contains_invisible` and
+  `invisible::contains_bidi_control` remain unconsumed by the pipeline. They are documented in
+  `text/mod.rs` as signals offered to bindings, explicitly NOT as controls this crate enforces.

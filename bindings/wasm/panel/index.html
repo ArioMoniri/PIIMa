@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>deid-tr panel</title>
+    <!--
+      NOTHING IS LOADED FROM A NETWORK ORIGIN. No CDN, no web font, no icon
+      sprite, no analytics. Every byte comes from this directory or from
+      ../pkg-web/. The stylesheet is a separate same-origin file rather than an
+      inline <style> so that `style-src 'self'` can be enforced without
+      'unsafe-inline'.
+
+      `connect-src 'self'` is the load-bearing directive: it permits exactly the
+      one request this page must make -- loading its own .wasm from the sibling
+      directory -- and forbids every cross-origin fetch, XHR, WebSocket,
+      EventSource and beacon. An earlier revision of the offline proof page said
+      `'none'`, which reads stronger and blocked the module's own load, so the
+      panel never started; a control that stops the product running is a bug
+      that happens to fail closed, not a stricter control.
+
+      `script-src 'self'` blocks inline scripts SILENTLY. Every script on this
+      page is therefore an external module file. Inlining any of them turns the
+      panel into an idle-looking form with no error anywhere.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'; img-src 'none'; font-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <link rel="stylesheet" href="./panel.css" />
+  </head>
+  <body>
+    <a class="skip" href="#note">Skip to the note editor</a>
+
+    <header class="topbar">
+      <div class="brand">
+        <h1>deid-tr</h1>
+        <p class="sub">
+          Turkish clinical de-identification, entirely in this tab.
+          <span id="build" class="mono"></span>
+        </p>
+      </div>
+      <div class="topbar-actions">
+        <label class="field compact" for="tier">Assurance tier</label>
+        <select id="tier">
+          <option value="safe-harbor" selected>Safe Harbor (L1 + L4 + L5)</option>
+          <option value="expert-determination">
+            Expert Determination - unavailable
+          </option>
+        </select>
+        <button id="theme" type="button" aria-pressed="false">
+          Dark theme
+        </button>
+      </div>
+    </header>
+
+    <!--
+      THE BANNER IS THE MOST IMPORTANT ELEMENT ON THE PAGE. A clinician who
+      pastes a note and sees identifiers disappear will assume the name went
+      with them. It did not. This states that at the top, in the reading order,
+      before any output.
+    -->
+    <aside class="banner" role="note" aria-labelledby="banner-title">
+      <h2 id="banner-title">What this panel does and does not remove</h2>
+      <ul>
+        <li>
+          <strong>Removed:</strong> identifiers the L1 rule layer can prove -
+          TCKN, VKN, IBAN, phone numbers, e-mail addresses, dates and the other
+          fixed-format direct identifiers, checksum-validated where the format
+          carries a checksum.
+        </li>
+        <li class="bad">
+          <strong>NOT removed: names.</strong> Patient, clinician and relative
+          names are the job of the L2 model ensemble.
+          <strong>No L2 model is loaded in this build</strong>, so deid-tr masks
+          zero names here. A name you paste stays in the output.
+        </li>
+        <li class="bad">
+          <strong>NOT removed: quasi-identifiers in prose</strong> - employer,
+          relationships, assets, distinctive events. That is L3, which needs a
+          local model this page does not have.
+        </li>
+        <li>
+          Paste synthetic text only. The tab never uploads anything, but the
+          text is still in your clipboard and your browser process.
+        </li>
+      </ul>
+    </aside>
+
+    <main>
+      <section class="card" aria-labelledby="source-title">
+        <div class="card-head">
+          <h2 id="source-title">Source note</h2>
+          <div class="card-head-actions">
+            <button id="sample" type="button" class="ghost">
+              Load sample note
+            </button>
+            <button id="clear" type="button" class="ghost">Clear</button>
+          </div>
+        </div>
+
+        <div id="drop" class="dropzone">
+          <p class="dz-main">Drop a file here, or</p>
+          <p>
+            <input
+              id="file"
+              type="file"
+              accept=".txt,.csv,.json,.md,text/plain,text/csv,application/json,text/markdown"
+            />
+          </p>
+          <p class="dz-note">
+            Plain text formats only: <code>.txt</code>, <code>.csv</code>,
+            <code>.json</code>, <code>.md</code>.
+            <strong>PDF and DOCX are handled by the CLI, not here.</strong>
+            Extracting text from those formats needs a parser, and a redacted
+            PDF must also have its text layer and its metadata scrubbed and then
+            verified - work that does not belong in a page whose whole claim is
+            that it ships no extra runtime. Use
+            <code class="mono">deid-tr</code> on the command line for them.
+          </p>
+        </div>
+
+        <label class="field" for="note">Clinical note (synthetic only)</label>
+        <textarea
+          id="note"
+          spellcheck="false"
+          rows="10"
+          placeholder="Paste or type a note. De-identification re-runs as you type."
+        ></textarea>
+        <p id="input-status" class="status" role="status" aria-live="polite">
+          Empty. Paste a note, drop a file, or load the sample.
+        </p>
+      </section>
+
+      <section class="card" aria-labelledby="controls-title">
+        <div class="card-head">
+          <h2 id="controls-title">Policy</h2>
+        </div>
+
+        <div class="control-block">
+          <label class="field" for="threshold">
+            Confidence threshold
+            <output id="threshold-value" class="mono">0.00</output>
+          </label>
+          <input
+            id="threshold"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value="0"
+            aria-describedby="threshold-warning"
+          />
+          <p id="threshold-warning" class="warn" hidden>
+            <strong>Raising this lowers recall.</strong> Every span below the
+            threshold is left in the output. Invariant I2 of this project:
+            <em>a missed identifier is a breach, an over-mask is a papercut</em>
+            - so the two directions are not symmetric and this slider is only
+            ever safe to move down. Checksum-validated spans sit at confidence
+            1.00 and are unaffected.
+          </p>
+          <p id="threshold-effect" class="warn strong" hidden></p>
+        </div>
+
+        <div class="control-block">
+          <h3>Entity types and redaction method</h3>
+          <p class="hint">
+            Types found in the current note. Switching one off means it is
+            <strong>left in the output unchanged</strong>.
+          </p>
+          <div id="entity-controls" class="entity-list"></div>
+          <p id="entity-empty" class="hint">
+            Nothing detected yet.
+          </p>
+          <p class="hint stub">
+            <strong>Redaction methods are a panel-side preview.</strong> Only
+            <em>surrogate</em> is the real thing: it shows what the wasm module's
+            L5 engine produced. Mask, redact, hash, date-shift and remove are
+            applied here in JavaScript over the span map, because
+            <code class="mono">RedactionPolicy</code> is not part of the wasm
+            binding's exported API yet. When it is, these controls move onto it
+            and the difference disappears. The panel-side hash is a
+            non-cryptographic FNV-1a digest for display only - it is not the
+            keyed HMAC a real hash method needs.
+          </p>
+        </div>
+      </section>
+
+      <section class="card wide" aria-labelledby="output-title">
+        <div class="card-head">
+          <h2 id="output-title">Output</h2>
+          <div class="tabs" role="tablist" aria-label="Output view">
+            <button
+              id="tab-highlight"
+              class="tab"
+              role="tab"
+              aria-selected="true"
+              aria-controls="view-highlight"
+              type="button"
+            >
+              Highlight
+            </button>
+            <button
+              id="tab-split"
+              class="tab"
+              role="tab"
+              aria-selected="false"
+              aria-controls="view-split"
+              type="button"
+            >
+              Split
+            </button>
+            <button
+              id="tab-inline"
+              class="tab"
+              role="tab"
+              aria-selected="false"
+              aria-controls="view-inline"
+              type="button"
+            >
+              Inline diff
+            </button>
+          </div>
+        </div>
+
+        <div
+          id="view-highlight"
+          class="view"
+          role="tabpanel"
+          aria-labelledby="tab-highlight"
+        >
+          <p class="hint">
+            The source, with every detected span marked. Focus or hover a mark
+            for its provenance.
+          </p>
+          <pre id="highlight" class="doc" tabindex="0"></pre>
+          <p id="span-detail" class="detail" role="status" aria-live="polite">
+            No span selected.
+          </p>
+        </div>
+
+        <div
+          id="view-split"
+          class="view"
+          role="tabpanel"
+          aria-labelledby="tab-split"
+          hidden
+        >
+          <div class="split">
+            <div>
+              <h3>Original</h3>
+              <pre id="split-original" class="doc"></pre>
+            </div>
+            <div>
+              <h3>De-identified</h3>
+              <pre id="split-output" class="doc"></pre>
+            </div>
+          </div>
+        </div>
+
+        <div
+          id="view-inline"
+          class="view"
+          role="tabpanel"
+          aria-labelledby="tab-inline"
+          hidden
+        >
+          <p class="hint">
+            Removed text struck through, the replacement immediately after it.
+          </p>
+          <pre id="inline-diff" class="doc"></pre>
+        </div>
+
+        <div id="output-empty" class="empty">
+          Nothing to show yet. The output appears as you type.
+        </div>
+        <div id="output-error" class="error" role="alert" hidden></div>
+      </section>
+
+      <section class="card wide" aria-labelledby="spanmap-title">
+        <div class="card-head">
+          <h2 id="spanmap-title">Span map</h2>
+          <p id="span-summary" class="hint"></p>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <caption class="visually-hidden">
+              Every candidate span, its byte offsets in the original and the
+              output, its provenance and its replacement.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Bytes in</th>
+                <th scope="col">Bytes out</th>
+                <th scope="col">Label</th>
+                <th scope="col">Layer</th>
+                <th scope="col">Decision</th>
+                <th scope="col">Conf.</th>
+                <th scope="col">Checksum</th>
+                <th scope="col">Method</th>
+                <th scope="col">Replacement</th>
+              </tr>
+            </thead>
+            <tbody id="spans"></tbody>
+          </table>
+        </div>
+        <p id="spans-empty" class="empty small">No spans yet.</p>
+      </section>
+
+      <section class="card wide" aria-labelledby="export-title">
+        <div class="card-head">
+          <h2 id="export-title">Export</h2>
+        </div>
+        <p class="hint">
+          Every export is generated in this tab and saved by your browser. The
+          span map carries the original text of every span, so
+          <strong>a span map export is as sensitive as the note itself</strong>.
+        </p>
+        <div class="row">
+          <button id="export-text" type="button">De-identified text</button>
+          <button id="export-json" type="button">Span map (JSON)</button>
+          <button id="export-csv" type="button">Span map (CSV)</button>
+          <button id="export-html" type="button">Highlight view (HTML)</button>
+        </div>
+        <p id="export-status" class="status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="card wide" aria-labelledby="network-title">
+        <div class="card-head">
+          <h2 id="network-title">Network</h2>
+        </div>
+        <p id="network" class="verdict">Starting.</p>
+        <!--
+          THREE CONTROLS, STATED SEPARATELY, BECAUSE THEY FAIL DIFFERENTLY.
+          An earlier revision said the counter "rises if anything on this page
+          attempts a request", which was not true of declarative loads: an
+          image assignment threw nothing and incremented nothing, and the page
+          still read "No network call". A privacy tool that overstates its own
+          instrument is worse than one that claims less.
+        -->
+        <p class="hint">
+          <strong>What is blocked.</strong> This page's Content-Security-Policy
+          is <code class="mono">default-src 'none'</code> with
+          <code class="mono">img-src 'none'</code> and
+          <code class="mono">font-src 'none'</code>;
+          <code class="mono">connect-src 'self'</code> permits exactly one
+          request, the module loading its own <code class="mono">.wasm</code>
+          from this origin. The browser refuses everything else before it
+          reaches the network, including image, media and font loads that no
+          script can intercept.
+        </p>
+        <p class="hint">
+          <strong>What is stubbed.</strong> Every networking global a script can
+          name - <code class="mono">fetch</code>,
+          <code class="mono">XMLHttpRequest</code>,
+          <code class="mono">WebSocket</code>,
+          <code class="mono">EventSource</code>,
+          <code class="mono">WebTransport</code>,
+          <code class="mono">RTCPeerConnection</code>,
+          <code class="mono">navigator.sendBeacon</code> - was replaced with a
+          throwing stub immediately after the module's own bytes were fetched
+          and before any note could be read. These are function replacements, so
+          they cover calls and nothing else: a declarative load such as
+          <code class="mono">new Image().src</code> is not a call on a global
+          and no stub can see it.
+        </p>
+        <p class="hint">
+          <strong>What is measured.</strong> The counter above reads the
+          browser's own resource timeline, which records every request the page
+          actually made regardless of how it was made - so it covers the
+          declarative loads the stubs cannot. Any non-zero reading turns the
+          verdict red. Open devtools, switch to the Network tab and reload: you
+          will see this document, the stylesheet, the scripts, the wasm-bindgen
+          glue and the .wasm module, and nothing after that no matter what you
+          paste.
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        Safe Harbor here means L1 rules, span algebra, L4 routing and L5
+        surrogates, compiled to WebAssembly from the same Rust the CLI runs. L2
+        would need <code class="mono">onnxruntime-web</code> and a trained
+        checkpoint; L3 would need a WebGPU-hosted local model. Neither is
+        bundled, and the panel says so rather than degrading quietly.
+      </p>
+    </footer>
+
+    <script type="module" src="./panel.js"></script>
+  </body>
+</html>

@@ -383,8 +383,20 @@ impl MedicalAllowlist {
     }
 
     /// Every entry whose normalised form equals `term`'s.
+    ///
+    /// A MIXED-SCRIPT TOKEN NEVER MATCHES, whatever it folds to. `carcinom` +
+    /// Cyrillic `а` skeletons to `carcinoma`, which is on this list, so without
+    /// this check the fold would hand an attacker a deterministic `Keep` for any
+    /// string they can disguise as a medical term -- recall losing to the
+    /// allowlist, which I2 forbids. Returning no entry does not mask anything by
+    /// itself; it withdraws the short-circuit so the span reaches the
+    /// adjudicator on its own evidence. A genuine `carcinoma` is single-script
+    /// and keeps its protection.
     #[must_use]
     pub fn lookup(&self, term: &str) -> &[AllowlistEntry] {
+        if crate::text::is_mixed_script(term) {
+            return &[];
+        }
         for variant in self.key_variants(term) {
             if let Some(hit) = self.by_key.get(&variant) {
                 return hit;
@@ -501,6 +513,23 @@ mod tests {
         assert_eq!(allowlist.strip_turkish_suffix("costa"), "costa");
         assert!(allowlist.contains("costa"));
         assert!(allowlist.contains("costa'da"));
+    }
+
+    #[test]
+    fn a_homoglyph_disguised_term_earns_no_allowlist_keep() {
+        // I2's precedence rule, enforced rather than described. The disguised
+        // form folds onto a real term, so without the mixed-script check any
+        // span could buy a deterministic `Keep` by swapping one letter.
+        let list = drug();
+        assert!(list.contains("Adalat"), "the genuine term is protected");
+        assert!(
+            !list.contains("Ad\u{0430}lat"),
+            "a Cyrillic `а` must not buy an allowlist Keep"
+        );
+        assert!(list.lookup("Ad\u{0430}lat").is_empty());
+        // Turkish is Latin script throughout: the four i letters and the rest of
+        // the alphabet must never read as mixed script and lose their entries.
+        assert!(!crate::text::is_mixed_script("İnfeksiyon şüphesi ığdır"));
     }
 
     #[test]

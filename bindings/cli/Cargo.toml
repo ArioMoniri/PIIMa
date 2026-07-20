@@ -32,6 +32,11 @@ repository.workspace = true
 # the reasoning. An addition here is reverted, not debated.
 [dependencies]
 deid-tr-core = { path = "../../core" }
+# The file/document layer: true PDF redaction, DOCX part rewriting, CSV/JSON
+# field masking. It is a PATH dependency with no third-party crates of its own
+# (see bindings/files/Cargo.toml), so admitting it opens no socket and forces no
+# registry resolve -- `just test-airgapped` stays green.
+deid-tr-files = { path = "../files" }
 # CSPRNG for the L5 salt. `core/` cannot generate one -- it performs no I/O
 # (I1), so it has no route to an operating-system entropy source and a salt it
 # invented from a counter would be a salt an attacker can guess. Supplying the
@@ -52,6 +57,12 @@ thiserror = "2"
 # one call away from a tool that runs on hospital machines.
 [dev-dependencies]
 minisign = "0.7"
+# A REAL JSON parser, IN THE TESTS ONLY. `src/format.rs` hand-writes its JSON
+# encoder so that no parser reaching clinical documents is linked into the
+# shipped binary; the tests then validate that encoder against an independent
+# implementation, which is the only way a hand-rolled escaper is trustworthy.
+# A dev-dependency is not in the release artifact.
+serde_json = "1"
 
 [[bin]]
 name = "deid"

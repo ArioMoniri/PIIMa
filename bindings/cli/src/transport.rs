@@ -16,7 +16,7 @@
 //! recorded in docs/DECISIONS.md D-020.
 
 use std::io::Read;
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
 use crate::config::Endpoint;
@@ -40,15 +40,67 @@ const ARTIFACT_LIMIT: u64 = 256 * 1024 * 1024;
 /// them, so the distinguishing signal is a connect that does not complete. This
 /// costs one SYN and tells us to stay quiet for a day (see `update::SUPPRESSION`)
 /// instead of paying a full TLS handshake timeout on every invocation.
-pub struct TcpProbe;
+pub struct TcpProbe<D = SystemDialer> {
+    dialer: D,
+}
 
-impl Reachability for TcpProbe {
+impl TcpProbe<SystemDialer> {
+    /// The probe as shipped: the operating system's resolver and a real socket.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            dialer: SystemDialer,
+        }
+    }
+}
+
+impl Default for TcpProbe<SystemDialer> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<D: Dial> Reachability for TcpProbe<D> {
     fn reachable(&self, endpoint: &Endpoint, timeout: Duration) -> bool {
-        let Ok(mut addrs) = (endpoint.host.as_str(), endpoint.port).to_socket_addrs() else {
+        let Some(addrs) = self.dialer.resolve(&endpoint.host, endpoint.port) else {
             // DNS failure is the most common air-gap signature of all.
             return false;
         };
-        addrs.any(|addr| TcpStream::connect_timeout(&addr, timeout).is_ok())
+        addrs
+            .into_iter()
+            .any(|addr| self.dialer.connect(addr, timeout))
+    }
+}
+
+/// Name resolution and connection, as two steps this crate can substitute.
+///
+/// WHY this is a seam and not two inlined stdlib calls: the unresolvable-host
+/// test used to hand a `.invalid` name to the SYSTEM resolver and assert a
+/// wall-clock budget. That budget measures whatever DNS the machine happens to
+/// be pointed at — a captive portal, a VPN resolver mid-reconnect, a cold cache
+/// — none of which is a property of this code, and one run in four went red for
+/// it. A release gate that flakes is a gate people learn to re-run rather than
+/// read, and this one guards I1. The BEHAVIOUR that matters — a name that does
+/// not resolve is reported unreachable and no connection is attempted, and the
+/// caller's timeout reaches the socket unchanged — is asserted here against a
+/// substituted dialer, with no clock and no packet involved.
+pub trait Dial {
+    /// The addresses to try, or `None` when the name does not resolve.
+    fn resolve(&self, host: &str, port: u16) -> Option<Vec<SocketAddr>>;
+    /// True when a connection completes inside `timeout`.
+    fn connect(&self, addr: SocketAddr, timeout: Duration) -> bool;
+}
+
+/// The real one: the OS resolver and one bounded TCP connect.
+pub struct SystemDialer;
+
+impl Dial for SystemDialer {
+    fn resolve(&self, host: &str, port: u16) -> Option<Vec<SocketAddr>> {
+        (host, port).to_socket_addrs().ok().map(Iterator::collect)
+    }
+
+    fn connect(&self, addr: SocketAddr, timeout: Duration) -> bool {
+        TcpStream::connect_timeout(&addr, timeout).is_ok()
     }
 }
 
@@ -126,6 +178,7 @@ impl ReleaseSource for HttpsSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
 
     fn endpoint() -> Endpoint {
         Endpoint {
@@ -136,14 +189,75 @@ mod tests {
         }
     }
 
+    /// A dialer that resolves to a fixed answer and records what it was asked to
+    /// connect to. Nothing here touches DNS or a socket, so the assertions below
+    /// hold identically on a laptop, in CI and inside `unshare -rn`.
+    struct FakeDialer {
+        answer: Option<Vec<SocketAddr>>,
+        succeed_on: Option<SocketAddr>,
+        attempts: RefCell<Vec<(SocketAddr, Duration)>>,
+    }
+
+    impl FakeDialer {
+        fn resolving_to(answer: Option<Vec<SocketAddr>>) -> Self {
+            Self {
+                answer,
+                succeed_on: None,
+                attempts: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl Dial for FakeDialer {
+        fn resolve(&self, _host: &str, _port: u16) -> Option<Vec<SocketAddr>> {
+            self.answer.clone()
+        }
+
+        fn connect(&self, addr: SocketAddr, timeout: Duration) -> bool {
+            self.attempts.borrow_mut().push((addr, timeout));
+            self.succeed_on == Some(addr)
+        }
+    }
+
+    fn addr(last: u8) -> SocketAddr {
+        // TEST-NET-1 (RFC 5737): documentation-only, never routed.
+        SocketAddr::from(([192, 0, 2, last], 443))
+    }
+
     #[test]
-    fn an_unresolvable_host_reads_as_unreachable_rather_than_hanging() {
-        let start = std::time::Instant::now();
-        assert!(!TcpProbe.reachable(&endpoint(), Duration::from_millis(200)));
+    fn an_unresolvable_host_reads_as_unreachable_and_opens_no_socket() {
+        let probe = TcpProbe {
+            dialer: FakeDialer::resolving_to(None),
+        };
+        assert!(!probe.reachable(&endpoint(), Duration::from_millis(200)));
         assert!(
-            start.elapsed() < Duration::from_secs(5),
-            "a failed probe must never become a startup delay"
+            probe.dialer.attempts.borrow().is_empty(),
+            "a name that does not resolve must not become a connect attempt"
         );
+    }
+
+    #[test]
+    fn the_callers_timeout_reaches_every_connect_unchanged() {
+        // The startup delay this bounds is the sum of the per-address timeouts,
+        // so a probe that silently widened or dropped the caller's budget would
+        // be the actual hang the old test was reaching for.
+        let budget = Duration::from_millis(200);
+        let probe = TcpProbe {
+            dialer: FakeDialer::resolving_to(Some(vec![addr(1), addr(2)])),
+        };
+        assert!(!probe.reachable(&endpoint(), budget));
+        assert_eq!(
+            *probe.dialer.attempts.borrow(),
+            vec![(addr(1), budget), (addr(2), budget)]
+        );
+    }
+
+    #[test]
+    fn a_host_that_answers_on_a_later_address_is_reachable() {
+        let mut dialer = FakeDialer::resolving_to(Some(vec![addr(1), addr(2)]));
+        dialer.succeed_on = Some(addr(2));
+        let probe = TcpProbe { dialer };
+        assert!(probe.reachable(&endpoint(), Duration::from_millis(200)));
     }
 
     #[test]

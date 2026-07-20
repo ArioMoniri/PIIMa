@@ -24,6 +24,12 @@ use std::path::Path;
 
 use deid_tr_core::surrogate::SALT_LEN;
 use deid_tr_core::{Pipeline, Salt, SurrogateEngine, Tier};
+// Aliased: `crate::format::Format` is the OUTPUT shape (text/json/csv/html) and
+// this one is the INPUT container. Two different questions that would otherwise
+// share a name in this module.
+use deid_tr_files::{detect_format, Format as FileFormat};
+
+use crate::format::Format;
 
 /// What went wrong, without ever carrying a fragment of the document (I4).
 #[derive(Debug, thiserror::Error)]
@@ -37,6 +43,26 @@ pub enum MaskError {
     /// The pipeline refused the document.
     #[error("de-identification failed: {0}")]
     Pipeline(#[from] deid_tr_core::Error),
+    /// The input is a binary container this verb must not rewrite as text.
+    ///
+    /// MEASURED, NOT HYPOTHETICAL. An UNCOMPRESSED PDF is valid UTF-8, so it
+    /// read cleanly, took the text path, and came out with its cross-reference
+    /// table rewritten by a surrogate -- a corrupt file that looks redacted. A
+    /// COMPRESSED one is worse in the other direction: the identifiers live in
+    /// a Flate stream the text path cannot see, so the rewrite would report
+    /// success having removed nothing. Both are refusals, and the refusal names
+    /// the verb that does the job.
+    #[error(
+        "this looks like a {0} file. `deid mask` rewrites text and would corrupt it \
+         while leaving identifiers in place; use `deid mask-file IN --out OUT`"
+    )]
+    NotTextFormat(&'static str),
+    /// The input is a container this build cannot redact at all.
+    #[error(
+        "the input is a binary container this build cannot redact as text; \
+         use `deid mask-file IN --out OUT` if it is a PDF, DOCX, CSV, JSON or JSONL file"
+    )]
+    UnknownContainer,
     /// The operating system would not produce key material for the L5 salt.
     ///
     /// FATAL RATHER THAN A DEGRADATION TO LABEL PLACEHOLDERS. A run that
@@ -75,7 +101,7 @@ pub struct Opts {
 /// the operating system. Before this, every `deid mask` ran with an empty
 /// allowlist and no surrogate engine: the entire D-010 collision resolution was
 /// unreachable from the binary, and the output was `[LABEL]` placeholders.
-fn build(tier: Tier, opts: Opts) -> Result<Pipeline, MaskError> {
+pub(crate) fn build(tier: Tier, opts: Opts) -> Result<Pipeline, MaskError> {
     let mut pipeline = Pipeline::new(tier);
     if opts.no_medical_allowlist {
         pipeline = pipeline.without_medical_allowlist();
@@ -95,16 +121,53 @@ fn build(tier: Tier, opts: Opts) -> Result<Pipeline, MaskError> {
 }
 
 /// Read from a path, or from stdin when the path is absent or `-`.
+///
+/// Reads BYTES and then decides, rather than reading a `String` and letting
+/// UTF-8 validity stand in for "this is a text document". The two are not the
+/// same question: an uncompressed PDF is valid UTF-8 and is not a text document.
 fn read_input(path: Option<&str>) -> Result<String, MaskError> {
-    match path {
+    let (bytes, name) = match path {
         None | Some("-") => {
-            let mut buffer = String::new();
+            let mut buffer = Vec::new();
             io::stdin()
-                .read_to_string(&mut buffer)
+                .read_to_end(&mut buffer)
                 .map_err(MaskError::Read)?;
-            Ok(buffer)
+            (buffer, None)
         }
-        Some(path) => std::fs::read_to_string(Path::new(path)).map_err(MaskError::Read),
+        Some(path) => (
+            std::fs::read(Path::new(path)).map_err(MaskError::Read)?,
+            Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned),
+        ),
+    };
+    refuse_binary_containers(&bytes, name.as_deref())?;
+    String::from_utf8(bytes).map_err(|_| {
+        // Not valid UTF-8 and not a container we recognise: this verb has no
+        // honest way to proceed, and guessing an encoding in a de-identification
+        // tool would silently change which bytes the rules layer sees.
+        MaskError::Read(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the input is not UTF-8",
+        ))
+    })
+}
+
+/// Refuse the formats a text rewrite would corrupt or silently miss.
+///
+/// DELIBERATELY NARROW. `Csv`, `Json` and `Jsonl` are text and masking them as
+/// text removes every identifier in them, so they are still accepted here and
+/// refusing them would be a regression. Only the binary containers -- and the
+/// containers this build cannot open at all -- are refused.
+fn refuse_binary_containers(bytes: &[u8], name: Option<&str>) -> Result<(), MaskError> {
+    match detect_format(bytes, name) {
+        Some(FileFormat::Pdf) => Err(MaskError::NotTextFormat("PDF")),
+        Some(FileFormat::Docx) => Err(MaskError::NotTextFormat("DOCX")),
+        // `detect_format` returns None for a zip that is not a .docx, which is a
+        // container whose text this build cannot reach.
+        None => Err(MaskError::UnknownContainer),
+        Some(_) => Ok(()),
     }
 }
 
@@ -117,29 +180,43 @@ pub fn run(
     path: Option<&str>,
     tier: Tier,
     opts: Opts,
+    format: Format,
+    threshold: Option<f32>,
     out: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> Result<(), MaskError> {
     let source = read_input(path)?;
     let pipeline = build(tier, opts)?;
     let result = pipeline.deidentify(&source)?;
+    let rendered = crate::format::render(format, &result, threshold);
 
     // write_all, not a format macro: the guard in scripts/hooks is right that
     // document bytes must never enter a format string, and stdout is the one
     // legitimate destination for them.
-    out.write_all(result.text.as_bytes())
+    out.write_all(rendered.as_bytes())
         .map_err(MaskError::Write)?;
     out.flush().map_err(MaskError::Write)?;
 
     // Counts and labels only. The span map is the round-trip table and stays in
     // memory; printing it would print the offsets of every identifier in a
     // document alongside the document.
-    let masked = result
-        .span_map
-        .iter()
-        .filter(|mapped| mapped.decision == deid_tr_core::Decision::Mask)
-        .count();
-    let _ = writeln!(diagnostics, "deid: masked {masked} span(s)");
+    let (total, masked, withheld) = crate::format::counts(&result, threshold);
+    let _ = writeln!(diagnostics, "deid: masked {masked} of {total} span(s)");
+    if threshold.is_some() {
+        // Printed EVERY time the flag is used, not once per session and not
+        // behind a verbose switch. A caller who reaches for a confidence
+        // threshold is usually reaching for a masking control, and this is the
+        // moment to tell them it is not one.
+        let _ = writeln!(diagnostics, "deid: {}", crate::format::RECALL_WARNING);
+        if format.has_report() {
+            let _ = writeln!(
+                diagnostics,
+                "deid: {withheld} span(s) withheld from the report; all {masked} masked span(s) are still masked in the output"
+            );
+        } else {
+            let _ = writeln!(diagnostics, "deid: {}", crate::format::NO_REPORT_NOTE);
+        }
+    }
     Ok(())
 }
 
@@ -162,6 +239,8 @@ mod tests {
             Some(path.to_str().expect("path")),
             Tier::SafeHarbor,
             Opts::default(),
+            Format::Text,
+            None,
             &mut out,
             &mut diagnostics,
         )
@@ -176,11 +255,73 @@ mod tests {
     }
 
     #[test]
+    fn a_pdf_is_refused_rather_than_rewritten_as_text() {
+        // THE MEASURED DEFECT. An uncompressed PDF is valid UTF-8, so it used to
+        // read cleanly, take the text path, and come out with its cross-reference
+        // table overwritten by a surrogate: a corrupt file that looks redacted.
+        let content = "BT /F1 12 Tf 72 720 Td (hasta kaydi) Tj ET";
+        let pdf = format!(
+            "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n\
+             4 0 obj\n<< /Length {} >>\nstream\n{content}\nendstream\nendobj\n\
+             xref\n0 1\n0000000000 65535 f \ntrailer\n<< /Size 5 >>\n%%EOF\n",
+            content.len()
+        );
+        let path = std::env::temp_dir().join(format!(
+            "deid-mask-pdf-{:?}.pdf",
+            std::thread::current().id()
+        ));
+        std::fs::write(&path, &pdf).expect("fixture");
+
+        let err = run(
+            Some(path.to_str().expect("path")),
+            Tier::SafeHarbor,
+            Opts::default(),
+            Format::Text,
+            None,
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )
+        .expect_err("a PDF must be refused by the text verb");
+        let rendered = err.to_string();
+        assert!(rendered.contains("PDF"));
+        assert!(
+            rendered.contains("mask-file"),
+            "the refusal must name the verb that does the job"
+        );
+    }
+
+    #[test]
+    fn the_text_shaped_formats_are_still_accepted() {
+        // The refusal is narrow on purpose: masking a CSV or a JSON file as text
+        // removes every identifier in it, so refusing them would be a regression.
+        for (name, body) in [
+            ("note.csv", "ad,tckn\nhasta,x\n"),
+            ("note.json", "{\n  \"ad\": \"hasta\"\n}\n"),
+            ("note.txt", "hasta kaydi"),
+        ] {
+            assert!(
+                refuse_binary_containers(body.as_bytes(), Some(name)).is_ok(),
+                "{name} was refused by the text verb"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unopenable_container_is_refused_rather_than_guessed_at() {
+        assert!(matches!(
+            refuse_binary_containers(b"PK\x03\x04not-a-docx", Some("a.zip")),
+            Err(MaskError::UnknownContainer)
+        ));
+    }
+
+    #[test]
     fn a_missing_input_file_is_an_error_that_names_no_content() {
         let err = run(
             Some("/nonexistent/clinical-note.txt"),
             Tier::SafeHarbor,
             Opts::default(),
+            Format::Text,
+            None,
             &mut Vec::new(),
             &mut Vec::new(),
         )

@@ -72,6 +72,18 @@ function is_hex_token(t) {
   while (match(rest, /(checksum|integrity|hash|digest|sha256|sha512|sha1|blake3|md5)[[:space:]]*[-:=][[:space:]]*"?[0-9a-zA-Z]+"?/)) {
     rest = substr(rest, 1, RSTART - 1) " " substr(rest, RSTART + RLENGTH)
   }
+  # Exclusion 4: the FRACTIONAL PART of a decimal number. The sliding window reads every 11-digit
+  # substring of a longer run, so a float mantissa is a lottery ticket: 0.8859259259259259 contains
+  # an 11-digit window that satisfies the TCKN checksum, and eval result artifacts are full of
+  # them. Two such windows blocked a real commit of eval/results/*.json.
+  #
+  # Narrow on purpose - only digits following a '.' that itself follows a digit, i.e. the tail of
+  # a number like 0.885..., never a bare or quoted 11-digit field. A TCKN written as JSON is
+  # either a quoted string or a bare 11-digit number, and both still get read in full.
+  while (match(rest, /[0-9]\.[0-9]+/)) {
+    keep = substr(rest, RSTART, 1)
+    rest = substr(rest, 1, RSTART - 1) keep " " substr(rest, RSTART + RLENGTH)
+  }
 
   while (match(rest, /[0-9A-Za-z]+/)) {
     token = substr(rest, RSTART, RLENGTH)

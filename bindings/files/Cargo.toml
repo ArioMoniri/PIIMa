@@ -1,0 +1,43 @@
+[package]
+name = "deid-tr-files"
+description = "File and document de-identification for deid-tr: txt, csv, jsonl, json, docx, and true PDF redaction."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# WHY THIS CRATE EXISTS AT ALL, AND WHY IT IS NOT IN `core/`.
+#
+# Everything here is filesystem work: reading bytes, decompressing zip and
+# Flate streams, rewriting containers. `core/` performs no I/O, has no network
+# dependency and compiles to wasm32 (I1), so a single `std::fs` call in it is a
+# reverted commit. This crate is the other side of that boundary: it owns the
+# bytes, hands `core/` a `&str`, and puts the answer back into the container.
+#
+# WHY THE DEPENDENCY LIST IS EMPTY OF THIRD-PARTY CODE.
+#
+# `lopdf`, `zip` and `flate2` are all reasonable choices and all three are
+# ABSENT from this machine's cargo registry cache and from the workspace
+# Cargo.lock. Adding any of them makes cargo resolve the registry -- a NETWORK
+# operation -- on every build in this workspace, and `just test-airgapped` is a
+# release gate. The workspace manifest already records this reasoning twice
+# (`bindings/python`, `bindings/ort`), so the precedent is the project's, not
+# this crate's.
+#
+# The cost is paid in `src/inflate.rs` (RFC 1951 DEFLATE decoder), `src/zip.rs`
+# (RFC 1952-adjacent PKZIP reader plus a STORED-only writer) and `src/pdf/`
+# (ISO 32000-1 object model). Every one of those is reading code, not writing
+# code: we decompress what we are given and we emit UNCOMPRESSED output.
+# Refusing to own a compressor is what keeps the surface small.
+#
+# LICENCE NOTE, recorded here because the research brief asked for it: MuPDF
+# and PyMuPDF are the only mainstream libraries with a real redaction
+# primitive, and both are AGPL, which is incompatible with this repository's
+# Apache-2.0 distribution. They are deliberately not used. `qpdf`/`pikepdf`
+# (Apache-2.0/MPL-2.0) would be licence-compatible and are the natural external
+# verification stack; `src/pdf/verify.rs` re-implements the checks that matter
+# (§A3 of the research brief) in-tree so that verification does not depend on a
+# binary being installed on a hospital machine.
+[dependencies]
+deid-tr-core = { path = "../../core" }
+thiserror = "2"

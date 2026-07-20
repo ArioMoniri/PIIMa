@@ -90,7 +90,13 @@
 //! who obtains the map has the document.
 
 mod format;
-mod keyed_hash;
+// VISIBLE TO THE CRATE, not just to L5. `redact::Hash` needs a keyed hash for
+// exactly the reason L5 does, and the alternative to sharing this one was a
+// second from-scratch BLAKE2s in `redact/`. Two implementations of one
+// primitive means two sets of test vectors, and the one that rots is the one
+// nobody looks at. The module stays private to the crate: it is not a public
+// cryptographic API and must not become one.
+pub(crate) mod keyed_hash;
 mod map;
 mod pools;
 

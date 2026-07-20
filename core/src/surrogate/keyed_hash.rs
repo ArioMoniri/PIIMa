@@ -25,7 +25,7 @@
 //! [`Span::text_hash`]: crate::span::Span::text_hash
 
 /// Digest width in bytes. 256 bits, the BLAKE2s maximum.
-pub(super) const DIGEST_LEN: usize = 32;
+pub(crate) const DIGEST_LEN: usize = 32;
 
 /// Block width in bytes, fixed by the algorithm.
 const BLOCK_LEN: usize = 64;
@@ -61,7 +61,7 @@ const SIGMA: [[usize; 16]; 10] = [
 /// No `Debug`: the state is a function of the key, and a `{:?}` of a keyed
 /// hasher is a key disclosure with a derive attribute on it (I4's reasoning,
 /// applied to key material rather than to text).
-pub(super) struct Blake2s {
+pub(crate) struct Blake2s {
     h: [u32; 8],
     /// Bytes fed into COMPRESSED blocks only. The buffered tail is added at
     /// finalisation, because BLAKE2 needs the last block flagged as last.
@@ -75,7 +75,7 @@ impl Blake2s {
     ///
     /// `key` is truncated at 32 bytes, which is the algorithm's maximum; the
     /// only caller ([`super::Salt`]) already holds exactly 32.
-    pub(super) fn keyed(key: &[u8]) -> Self {
+    pub(crate) fn keyed(key: &[u8]) -> Self {
         let key = key.get(..key.len().min(DIGEST_LEN)).unwrap_or(&[]);
         let mut h = IV;
         // The parameter block: digest length, key length, fanout 1, depth 1.
@@ -103,7 +103,7 @@ impl Blake2s {
     /// on a full buffer: BLAKE2 marks the final block with a domain flag, and a
     /// message that is an exact multiple of the block size would otherwise have
     /// its last block already compressed unflagged by the time `finalize` runs.
-    pub(super) fn update(&mut self, mut data: &[u8]) {
+    pub(crate) fn update(&mut self, mut data: &[u8]) {
         while !data.is_empty() {
             if self.filled == BLOCK_LEN {
                 self.counter += BLOCK_LEN as u64;
@@ -125,13 +125,13 @@ impl Blake2s {
     /// and be handed the same surrogate. Prefixing each field with its length
     /// makes the encoding injective, so a derivation collision has to be a
     /// collision of BLAKE2s rather than of string concatenation.
-    pub(super) fn update_field(&mut self, data: &[u8]) {
+    pub(crate) fn update_field(&mut self, data: &[u8]) {
         self.update(&(data.len() as u64).to_le_bytes());
         self.update(data);
     }
 
     /// Consume the state and produce the digest.
-    pub(super) fn finalize(mut self) -> [u8; DIGEST_LEN] {
+    pub(crate) fn finalize(mut self) -> [u8; DIGEST_LEN] {
         self.counter += self.filled as u64;
         self.block[self.filled..].fill(0);
         self.compress(true);

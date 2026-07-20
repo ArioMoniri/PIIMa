@@ -13,7 +13,22 @@
 //! If this test ever needs to be relaxed, it does not. Move the network call to
 //! process start instead.
 
-const MASK: &str = include_str!("../src/mask.rs");
+/// Every module that can hold a clinical document in memory.
+///
+/// `batch.rs` and `format.rs` were added with the directory processor and the
+/// output formats. Both read documents -- `batch` reads a whole tree of them --
+/// so both are on exactly the same footing as `mask.rs`, and a scan that covered
+/// only `mask.rs` would have grown a hole the moment the batch path landed.
+/// `maskfile.rs` joined them with `deid mask-file`, which reads PDFs and DOCX
+/// files: the same footing again, and the same reason the list is enumerated
+/// here rather than inferred.
+const DOCUMENT_MODULES: [(&str, &str); 4] = [
+    ("src/mask.rs", include_str!("../src/mask.rs")),
+    ("src/batch.rs", include_str!("../src/batch.rs")),
+    ("src/format.rs", include_str!("../src/format.rs")),
+    ("src/maskfile.rs", include_str!("../src/maskfile.rs")),
+];
+
 const MAIN: &str = include_str!("../src/main.rs");
 
 /// Source with comment lines removed.
@@ -34,56 +49,80 @@ fn code_of(source: &str) -> String {
 const NETWORKING: [&str; 3] = ["update", "transport", "reqwest"];
 
 #[test]
-fn the_mask_module_cannot_name_any_networking_module() {
-    let code = code_of(MASK);
-    for module in NETWORKING {
-        assert!(
-            !code.contains(module),
-            "src/mask.rs references `{module}`. The mask path holds clinical text \
-             in memory; nothing reachable from it may open a socket (I1)."
-        );
+fn no_document_module_can_name_any_networking_module() {
+    for (name, source) in DOCUMENT_MODULES {
+        let code = code_of(source);
+        for module in NETWORKING {
+            assert!(
+                !code.contains(module),
+                "{name} references `{module}`. The masking path holds clinical text \
+                 in memory; nothing reachable from it may open a socket (I1)."
+            );
+        }
     }
 }
 
 #[test]
-fn the_mask_module_opens_no_socket_and_imports_no_client() {
-    let code = code_of(MASK);
-    for banned in ["TcpStream", "TcpListener", "UdpSocket", "std::net"] {
-        assert!(
-            !code.contains(banned),
-            "src/mask.rs references `{banned}`, which is a socket by another name."
-        );
+fn no_document_module_opens_a_socket_or_imports_a_client() {
+    for (name, source) in DOCUMENT_MODULES {
+        let code = code_of(source);
+        for banned in ["TcpStream", "TcpListener", "UdpSocket", "std::net"] {
+            assert!(
+                !code.contains(banned),
+                "{name} references `{banned}`, which is a socket by another name."
+            );
+        }
     }
 }
 
-/// The body of the `Command::Mask` dispatch arm in `main.rs`.
+/// EVERY document-handling dispatch arm in `main.rs`, as one slice.
 ///
-/// Extracted by slicing between the two arm labels rather than by parsing: the
-/// match is written with `Mask` immediately before `Update` for exactly this
-/// reason, and a reorder that breaks the slice fails the assertion below rather
-/// than silently passing.
-fn mask_dispatch_arm() -> &'static str {
-    let start = MAIN
-        .find("Command::Mask { path, tier, opts } =>")
-        .expect("the Mask dispatch arm must exist and keep its shape");
+/// Extracted by slicing from the first `Command::Mask` arm in the dispatch match
+/// to the `Command::Update` arm rather than by parsing. There are now four such
+/// arms -- batch, single document, the refusal when both are given, and
+/// `mask-file` -- and anchoring on one of them by its exact field list is what
+/// broke when the second was added. The match is written with every document arm
+/// immediately before `Update` for exactly this reason, and a reorder that
+/// breaks the slice fails the assertion below rather than silently passing.
+fn mask_dispatch_arms() -> &'static str {
+    let dispatch = MAIN
+        .find("match command {")
+        .expect("the dispatch match must exist");
+    let start = dispatch
+        + MAIN[dispatch..]
+            .find("Command::Mask {")
+            .expect("a Mask dispatch arm must exist");
     let end = MAIN[start..]
         .find("Command::Update =>")
-        .expect("the Update arm must follow the Mask arm; see this test's comment");
+        .expect("the Update arm must follow every document arm; see this test's comment");
     &MAIN[start..start + end]
 }
 
 #[test]
-fn the_mask_dispatch_arm_never_calls_the_updater() {
-    let arm = mask_dispatch_arm();
+fn no_mask_dispatch_arm_ever_calls_the_updater() {
+    let arm = mask_dispatch_arms();
+    // The slice really does span all three arms, or the scan below is checking
+    // one arm and claiming three.
+    assert_eq!(
+        arm.matches("Command::Mask {").count(),
+        3,
+        "the mask dispatch arms moved; this scan is no longer covering all of them"
+    );
+    assert_eq!(
+        arm.matches("Command::MaskFile {").count(),
+        1,
+        "the mask-file dispatch arm moved out of the scanned slice; it reads PDFs \
+         and DOCX files and is on the same footing as the mask arms"
+    );
     for module in NETWORKING {
         assert!(
             !arm.contains(&format!("{module}::")),
-            "the Command::Mask arm in src/main.rs calls into `{module}`."
+            "a document dispatch arm in src/main.rs calls into `{module}`."
         );
     }
     assert!(
         !arm.contains("spawn_startup_check"),
-        "the Command::Mask arm spawns an update check. The check is asynchronous, \
+        "a document dispatch arm spawns an update check. The check is asynchronous, \
          so it would still be in flight while the note is in memory."
     );
 }

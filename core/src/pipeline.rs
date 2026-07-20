@@ -29,8 +29,8 @@ use core::fmt;
 
 use crate::audit::{AuditEntry, AuditLog};
 use crate::detect::{NerEnsemble, NerError, Normalization, Normalized, Tokenized};
-use crate::error::{DetectionFailure, Error, Result, SurrogateFailure};
-use crate::label::EntityLabel;
+use crate::error::{DetectionFailure, Error, RedactionFailure, Result, SurrogateFailure};
+use crate::redact::{HashKey, RedactionMethod, RedactionPolicy, Redactor, Rendered};
 use crate::route::{route_all, Adjudicator, MedicalAllowlist, Rationale, RoutingStats};
 use crate::span::{union_widest, Decision, Merged, Span};
 use crate::surrogate::{SurrogateEngine, SurrogateError};
@@ -118,6 +118,44 @@ impl From<NerError> for Error {
     }
 }
 
+/// The same flattening for the redaction layer.
+///
+/// `SpanOutOfBounds` and the nested `SurrogateError` are passed through rather
+/// than reclassified, for the same reason `NerError::Span` is: an offset defect
+/// or a pool exhaustion renamed "redaction failure" is a defect nobody will
+/// look for where it actually is. `OverlappingSpans` is unreachable on this
+/// path -- the pipeline renders one span at a time and its candidates come out
+/// of `union_widest` already non-overlapping -- and is mapped to the offset
+/// error rather than given a variant that could never be observed.
+impl From<crate::redact::RedactError> for Error {
+    fn from(error: crate::redact::RedactError) -> Self {
+        use crate::redact::RedactError as R;
+        let kind = match error {
+            R::Surrogate(inner) => return inner.into(),
+            R::SpanOutOfBounds { offset, doc_len } => {
+                return Self::SpanOutOfBounds { offset, doc_len }
+            }
+            R::OverlappingSpans {
+                left_start,
+                left_end,
+                ..
+            } => {
+                return Self::SpanNotOrdered {
+                    start: left_start,
+                    end: left_end,
+                }
+            }
+            R::HashKeyRequired => RedactionFailure::HashKeyRequired,
+            R::SurrogateEngineRequired { .. } => RedactionFailure::SurrogateEngineRequired,
+            R::HashKeyTooShort { .. } => RedactionFailure::HashKeyTooShort,
+            R::BlackoutWidthOutOfRange { .. } | R::BlackoutFillNotVisible => {
+                RedactionFailure::BlackoutRejected
+            }
+        };
+        Self::RedactionFailed { kind }
+    }
+}
+
 /// The same flattening for L5.
 ///
 /// `SurrogateError::SpanOutOfBounds` is passed through for the same reason
@@ -152,6 +190,13 @@ pub struct MappedSpan {
     pub rationale: Rationale,
     /// The text substituted, when the decision was to mask. Not PHI.
     pub replacement: Option<String>,
+    /// The redaction method actually applied, when the decision was to mask.
+    ///
+    /// RECORDED RATHER THAN INFERRED FROM THE POLICY, because the policy states
+    /// what was asked for and this states what happened -- and the two differ on
+    /// `DateShift` against a non-date label. A caller auditing a run needs the
+    /// second number, not the first.
+    pub applied_method: Option<RedactionMethod>,
     /// Inclusive byte offset in the OUTPUT text.
     pub output_start: usize,
     /// Exclusive byte offset in the OUTPUT text.
@@ -181,6 +226,7 @@ impl fmt::Debug for MappedSpan {
             .field("decision", &self.decision)
             .field("rationale", &self.rationale)
             .field("replacement", &self.replacement)
+            .field("applied_method", &self.applied_method)
             .field("output_start", &self.output_start)
             .field("output_end", &self.output_end)
             .field("original", &format_args!("<redacted>"))
@@ -323,6 +369,8 @@ pub struct Pipeline {
     allowlist: MedicalAllowlist,
     adjudicator: Option<Box<dyn Adjudicator>>,
     surrogate: Option<SurrogateEngine>,
+    redaction: Option<RedactionPolicy>,
+    hash_key: Option<HashKey>,
     tier: Tier,
 }
 
@@ -357,6 +405,8 @@ impl Pipeline {
             allowlist: crate::route::vocabulary::bundled().clone(),
             adjudicator: None,
             surrogate: None,
+            redaction: None,
+            hash_key: None,
             tier,
         }
     }
@@ -437,6 +487,57 @@ impl Pipeline {
     pub fn with_surrogates(mut self, surrogate: SurrogateEngine) -> Self {
         self.surrogate = Some(surrogate);
         self
+    }
+
+    /// Choose what happens to a masked span, PER ENTITY TYPE.
+    ///
+    /// Without this the pipeline applies one method to everything: surrogates
+    /// when L5 is installed, the label placeholder when it is not. That is the
+    /// right default and it cannot express what a real deployment wants --
+    /// names masked so a clinician sees that a name stood there, dates shifted
+    /// so research intervals survive, IBANs removed because a bank account has
+    /// no clinical value. See [`RedactionPolicy`].
+    ///
+    /// SELECTING A METHOD DOES NOT INSTALL ITS DEPENDENCIES. A policy naming
+    /// [`RedactionMethod::Hash`] needs [`Self::with_hash_key`] and one naming
+    /// [`RedactionMethod::Surrogate`] or [`RedactionMethod::DateShift`] needs
+    /// [`Self::with_surrogates`]; without them `deidentify` returns
+    /// [`Error::RedactionFailed`] rather than silently applying something else.
+    #[must_use]
+    pub fn with_redaction_policy(mut self, policy: RedactionPolicy) -> Self {
+        self.redaction = Some(policy);
+        self
+    }
+
+    /// Install the key [`RedactionMethod::Hash`] needs.
+    ///
+    /// `core/` cannot generate one -- it has no CSPRNG (I1) -- so the key
+    /// arrives from a binding or it does not exist.
+    #[must_use]
+    pub fn with_hash_key(mut self, key: HashKey) -> Self {
+        self.hash_key = Some(key);
+        self
+    }
+
+    /// The redaction policy in force, INCLUDING the implicit default.
+    ///
+    /// Returned by value rather than by reference because the default is
+    /// DERIVED from whether L5 is installed rather than stored. A caller
+    /// auditing a configuration needs the effective policy, not the one that
+    /// was typed.
+    #[must_use]
+    pub fn redaction_policy(&self) -> RedactionPolicy {
+        self.redaction.clone().unwrap_or_else(|| {
+            // The behaviour that predates this seam, written out as a policy so
+            // there is exactly ONE rendering path in the crate: surrogates when
+            // an engine is installed, the label placeholder when it is not.
+            // `Mask` renders `[LABEL]`, byte-identical to the old placeholder.
+            RedactionPolicy::new(if self.surrogate.is_some() {
+                RedactionMethod::Surrogate
+            } else {
+                RedactionMethod::Mask
+            })
+        })
     }
 
     /// The configured tier.
@@ -533,21 +634,29 @@ impl Pipeline {
         // entity get the same surrogate everywhere in it (L5 property (b)).
         let mut assigner = self.surrogate.as_ref().map(SurrogateEngine::assigner);
 
+        // Policy and redactor are built once per document, so the per-entity
+        // method lookup is a map read and the effective default is computed in
+        // exactly one place.
+        let policy = self.redaction_policy();
+        let mut redactor = Redactor::new(&policy);
+        if let Some(key) = self.hash_key.as_ref() {
+            redactor = redactor.with_hash_key(key);
+        }
+
         for outcome in &routed {
             let span = outcome.span;
             let original = slice(doc, span.start(), span.end())?;
             text.push_str(slice(doc, cursor, span.start())?);
 
             let output_start = text.len();
-            let replacement = match outcome.decision {
-                Decision::Mask => Some(match assigner.as_mut() {
-                    Some(assigner) => assigner.assign(span.label(), original)?,
-                    None => placeholder(span.label()),
-                }),
+            let rendered = match outcome.decision {
+                Decision::Mask => {
+                    Some(redactor.replacement_for(span.label(), original, assigner.as_mut())?)
+                }
                 Decision::Keep => None,
             };
-            match replacement.as_deref() {
-                Some(surrogate) => text.push_str(surrogate),
+            match rendered.as_ref() {
+                Some(Rendered { replacement, .. }) => text.push_str(replacement),
                 None => text.push_str(original),
             }
             let output_end = text.len();
@@ -558,7 +667,8 @@ impl Pipeline {
                 span,
                 decision: outcome.decision,
                 rationale: outcome.rationale,
-                replacement,
+                applied_method: rendered.as_ref().map(|r| r.applied),
+                replacement: rendered.map(|r| r.replacement),
                 output_start,
                 output_end,
                 original: original.to_owned(),
@@ -575,11 +685,6 @@ impl Pipeline {
     }
 }
 
-/// The replacement used when no L5 engine is installed: the label, not the text.
-fn placeholder(label: EntityLabel) -> String {
-    format!("[{}]", label.as_str())
-}
-
 /// Slice without panicking on a bad range.
 fn slice(doc: &str, start: usize, end: usize) -> Result<&str> {
     doc.get(start..end).ok_or(Error::SpanOutOfBounds {
@@ -591,7 +696,7 @@ fn slice(doc: &str, start: usize, end: usize) -> Result<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::label::QuasiCategory;
+    use crate::label::{EntityLabel, QuasiCategory};
     use crate::span::{union_widest, DetectorId, Layer, CHECKSUM_CONFIDENCE};
     use std::cell::Cell;
     use std::rc::Rc;
@@ -849,6 +954,7 @@ mod tests {
                 span: employer_span(0.9),
                 decision: Decision::Mask,
                 rationale: Rationale::Protected,
+                applied_method: Some(RedactionMethod::Mask),
                 replacement: Some("[EMPLOYER_ROLE]".to_owned()),
                 output_start: 6,
                 output_end: 21,
@@ -904,6 +1010,94 @@ mod tests {
         assert!(Merged::single(masked.span).is_protected());
         assert_eq!(&doc[masked.span.start()..masked.span.end()], tckn);
         assert_eq!(result.reidentify(), doc);
+    }
+
+    #[test]
+    fn the_redaction_policy_is_honoured_per_entity_type_through_the_pipeline() {
+        // The seam this exists for: one run, two entity types, two methods.
+        // L1 proves both identifiers, so this exercises the shipped path rather
+        // than a hand-built span set.
+        use crate::redact::Blackout;
+        let tckn = crate::rules::checksum_valid_tckn_for_tests();
+        let doc = format!("TCKN {tckn}, tel 0(532) 000 00 00.");
+        let policy = RedactionPolicy::new(RedactionMethod::Mask).with(
+            EntityLabel::Tckn,
+            RedactionMethod::Redact(Blackout::new('#', 6).expect("valid blackout")),
+        );
+        let result = Pipeline::new(Tier::SafeHarbor)
+            .with_redaction_policy(policy)
+            .deidentify(&doc)
+            .expect("run");
+
+        assert!(!result.text.contains(&tckn), "the TCKN survived masking");
+        assert!(result.text.contains("######"));
+        assert!(result.text.contains("[PHONE]"));
+
+        let method = |label| {
+            result
+                .span_map
+                .iter()
+                .find(|m| m.span.label() == label)
+                .and_then(|m| m.applied_method)
+        };
+        assert_eq!(
+            method(EntityLabel::Tckn),
+            Some(RedactionMethod::Redact(
+                Blackout::new('#', 6).expect("valid blackout")
+            ))
+        );
+        assert_eq!(method(EntityLabel::Phone), Some(RedactionMethod::Mask));
+        assert_eq!(result.reidentify(), doc);
+    }
+
+    #[test]
+    fn a_policy_naming_hash_without_a_key_fails_rather_than_hashing_unkeyed() {
+        // The whole reason the key exists: an unkeyed digest of a short Turkish
+        // name is brute-forceable by enumeration, and a silent fallback to one
+        // produces output that looks identical.
+        let tckn = crate::rules::checksum_valid_tckn_for_tests();
+        let doc = format!("TCKN {tckn}.");
+        assert_eq!(
+            Pipeline::new(Tier::SafeHarbor)
+                .with_redaction_policy(RedactionPolicy::new(RedactionMethod::Hash))
+                .deidentify(&doc),
+            Err(Error::RedactionFailed {
+                kind: RedactionFailure::HashKeyRequired
+            })
+        );
+        // With a key installed the same run succeeds and the token is keyed.
+        let token = |byte: u8| {
+            Pipeline::new(Tier::SafeHarbor)
+                .with_redaction_policy(RedactionPolicy::new(RedactionMethod::Hash))
+                .with_hash_key(HashKey::from_bytes([byte; crate::redact::HASH_KEY_LEN]))
+                .deidentify(&doc)
+                .expect("run")
+                .text
+        };
+        assert!(!token(1).contains(&tckn));
+        assert_ne!(token(1), token(2), "the digest did not depend on the key");
+        assert_eq!(token(1), token(1));
+    }
+
+    #[test]
+    fn the_default_policy_is_the_behaviour_that_predates_the_seam() {
+        // No policy, no engine: the label placeholder, exactly as before.
+        assert_eq!(
+            Pipeline::new(Tier::SafeHarbor)
+                .redaction_policy()
+                .default_method(),
+            RedactionMethod::Mask
+        );
+        // No policy, engine installed: surrogates, exactly as before.
+        assert_eq!(
+            Pipeline::new(Tier::SafeHarbor)
+                .with_surrogates(SurrogateEngine::new(crate::surrogate::Salt::from_bytes(
+                    [3u8; crate::surrogate::SALT_LEN]
+                )))
+                .redaction_policy()
+                .default_method(),
+            RedactionMethod::Surrogate
+        );
     }
 
     #[test]
