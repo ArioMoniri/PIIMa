@@ -215,11 +215,18 @@ killing anything). Where tmux is not installed it falls back to `nohup` plus a p
 rather than pretending. Either way the surfaces survive the SSH connection dropping, which the
 foreground recipes below do not.
 
-| surface | port | what |
+| surface | preferred port | what |
 |---|---|---|
 | `serve` | 8787 | `deid-serve`, the HTTP service |
 | `panel` | 8722 | the vanilla panel, no build step |
 | `panel-app` | 8723 | the React panel |
+
+**Ports are chosen automatically.** Each surface takes its preferred port when it is free and the
+next one up when it is not, which on a shared server is the difference between starting and being
+stuck behind whoever got there first. When it moves it says so and names the process holding the
+port. `status` reports where each surface actually is, `down` stops what is actually running, and
+the `ssh` command below is printed by `just up` with the real ports filled in rather than the
+preferred ones, because a tunnel hint that is wrong after a port moves is worse than no hint.
 
 Reach them from your laptop over SSH. No exposure, no TLS to terminate, no bearer token:
 

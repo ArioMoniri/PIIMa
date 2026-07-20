@@ -61,7 +61,12 @@ fail() { printf '  %s\n' "$*" >&2; }
 # Surface definitions
 # ---------------------------------------------------------------------------
 
-surface_port() {
+# The port a surface WANTS. What it gets is decided at start time by
+# `pick_free_port`, because on a shared server the preferred one is regularly
+# taken by somebody else's process and refusing to start is a worse answer than
+# moving. The preferred value is still first choice, so the common case stays
+# the documented one.
+surface_preferred_port() {
     case "$1" in
         serve) echo 8787 ;;
         panel) echo 8722 ;;
@@ -85,25 +90,28 @@ surface_what() {
 # trusts, and an operator reading `ps` on a shared box should not have to know
 # the default to know the posture.
 surface_cmd() {
+    local port="$2"
     case "$1" in
         serve)
-            printf '%s --host 127.0.0.1 --port 8787' "$(printf %q "${REPO}/target/release/deid-serve")"
+            printf '%s --host 127.0.0.1 --port %s' "$(printf %q "${REPO}/target/release/deid-serve")" "${port}"
             ;;
         panel)
             # Document root is bindings/wasm, not panel/: both pages load the
             # wasm module from the sibling ../pkg-web/.
-            printf '%s %s --port 8722 --directory %s --page panel/index.html' \
+            printf '%s %s --port %s --directory %s --page panel/index.html' \
                 "$(printf %q "${REPO}/${VENV_PY}")" \
                 "$(printf %q "${REPO}/scripts/panel_server.py")" \
+                "${port}" \
                 "$(printf %q "${REPO}/bindings/wasm")"
             ;;
         panel-app)
             # Serves the BUILT bundle, never the Vite dev server: a dev server
             # opens a websocket for hot reload, which is a live connection out of
             # a page whose whole claim is that it makes none.
-            printf '%s %s --port 8723 --directory %s --page index.html' \
+            printf '%s %s --port %s --directory %s --page index.html' \
                 "$(printf %q "${REPO}/${VENV_PY}")" \
                 "$(printf %q "${REPO}/scripts/panel_server.py")" \
+                "${port}" \
                 "$(printf %q "${REPO}/bindings/panel-app/dist")"
             ;;
         *) fail "unknown surface: $1"; exit 2 ;;
@@ -156,6 +164,42 @@ surface_preflight() {
 
 pid_file() { echo "${RUN_DIR}/$1.pid"; }
 mech_file() { echo "${RUN_DIR}/$1.mechanism"; }
+port_file() { echo "${RUN_DIR}/$1.port"; }
+
+# The port a surface is ACTUALLY on, or the one it would prefer if it is down.
+#
+# Recorded rather than recomputed: once a surface has moved to 8788 because 8787
+# was taken, `status`, `down`, `logs` and the tunnel hint must all say 8788. A
+# `down` that looks at the preferred port would report success while leaving the
+# real listener running, which is the failure mode `down` exists to prevent.
+recorded_or_preferred_port() {
+    local f
+    f="$(port_file "$1")"
+    if [ -s "${f}" ]; then
+        cat "${f}"
+    else
+        surface_preferred_port "$1"
+    fi
+}
+
+# First free port at or above the preferred one.
+#
+# Scans a bounded window rather than asking the kernel for an ephemeral port: an
+# operator has to be able to write the tunnel command down, and a port that moves
+# every restart is one they have to look up every time. Sixteen is enough for a
+# machine running a few copies and small enough that exhausting it means
+# something is wrong that a wider scan would only hide.
+pick_free_port() {
+    local preferred="$1" candidate limit
+    preferred="$(printf '%s' "${preferred}" | tr -cd '0-9')"
+    limit=$(( preferred + 16 ))
+    candidate="${preferred}"
+    while [ "${candidate}" -lt "${limit}" ]; do
+        port_busy "${candidate}" || { printf '%s' "${candidate}"; return 0; }
+        candidate=$(( candidate + 1 ))
+    done
+    return 1
+}
 log_file() { echo "${LOG_DIR}/$1.log"; }
 
 pid_alive() { kill -0 "$1" 2>/dev/null; }
@@ -222,7 +266,7 @@ is_running() {
 up_one() {
     local name="$1"
     local port log pidf cmd
-    port="$(surface_port "${name}")"
+    port="$(recorded_or_preferred_port "${name}")"
     log="$(log_file "${name}")"
     pidf="$(pid_file "${name}")"
 
@@ -231,22 +275,35 @@ up_one() {
         return 0
     fi
 
-    # A stale pidfile with a live listener is the dangerous case: starting a
-    # second copy would silently fail to bind and the operator would be talking
-    # to the OLD build. Refuse and say who to ask.
-    if port_busy "${port}"; then
-        fail "${name}: port ${port} is already in use by a process this script did not start."
-        local holder
-        holder="$(port_holder "${port}")"
-        [ -n "${holder}" ] && printf '%s\n' "${holder}" >&2
-        fail "    Nothing was started. Stop that process, or run: just down"
+    # MOVE, rather than refuse, when the preferred port is taken.
+    #
+    # This used to refuse outright and name the holder. That is the right answer
+    # for a laptop and the wrong one for a shared server, where 8787 belongs to
+    # whoever got there first and an operator who cannot start is stuck. So take
+    # the next free port and SAY SO, loudly enough that nobody writes down the
+    # preferred one out of habit.
+    #
+    # The dangerous case this used to guard is handled above and separately: a
+    # live surface of our own is left alone rather than started twice.
+    local preferred
+    preferred="$(surface_preferred_port "${name}")"
+    if ! port="$(pick_free_port "${preferred}")"; then
+        fail "${name}: no free port in ${preferred}..$(( preferred + 15 ))."
+        fail "    Sixteen consecutive ports in use is not a busy machine, it is a problem."
+        fail "    Look at what is holding them:  lsof -nP -iTCP:${preferred}-$(( preferred + 15 )) -sTCP:LISTEN"
         return 1
+    fi
+    if [ "${port}" != "${preferred}" ]; then
+        note "${name}: port ${preferred} is taken, using ${port} instead"
+        local holder
+        holder="$(port_holder "${preferred}")"
+        [ -n "${holder}" ] && printf '    %s held by: %s\n' "${preferred}" "${holder}"
     fi
 
     surface_preflight "${name}" || return 1
 
     mkdir -p "${LOG_DIR}" "${RUN_DIR}"
-    cmd="$(surface_cmd "${name}")"
+    cmd="$(surface_cmd "${name}" "${port}")"
 
     local mechanism
     if tmux_available; then
@@ -276,6 +333,12 @@ up_one() {
         echo "$!" > "${pidf}"
     fi
     echo "${mechanism}" > "$(mech_file "${name}")"
+    # BEFORE the readiness poll below, not after. If the poll times out we still
+    # return non-zero, but `down` has to be able to find and stop whatever we
+    # just started -- a surface that failed to come up cleanly is exactly the one
+    # somebody needs to kill, and looking for it on the preferred port would miss
+    # it whenever it had moved.
+    echo "${port}" > "$(port_file "${name}")"
 
     # Started is not the same as listening. Poll the port so `up` reports a fact
     # rather than an intention -- a recipe that says OK and leaves the operator
@@ -324,7 +387,19 @@ cmd_up() {
     note "stop:    just down"
     echo
     note "Loopback only. From your laptop:"
-    note "  ssh -N -L 8787:127.0.0.1:8787 -L 8722:127.0.0.1:8722 -L 8723:127.0.0.1:8723 YOU@THIS-SERVER"
+    # BUILT FROM THE PORTS ACTUALLY IN USE, never from the preferred ones.
+    #
+    # A hardcoded hint is worse than no hint the moment a surface moves: the
+    # operator pastes it, the tunnel comes up against a port nothing is on, and
+    # the browser shows a connection refused that looks like the server failed to
+    # start. Automatic port selection is only usable if everything that prints a
+    # port prints the real one.
+    local tunnel="" surface_name surface_actual
+    for surface_name in ${SURFACES}; do
+        surface_actual="$(recorded_or_preferred_port "${surface_name}")"
+        tunnel="${tunnel} -L ${surface_actual}:127.0.0.1:${surface_actual}"
+    done
+    note "  ssh -N${tunnel} YOU@THIS-SERVER"
     echo
     note "THIS BUILD MASKS NO NAMES: L2 has no trained model and no weights ship, so"
     note "patient, clinician and relative names pass through untouched. 'just deploy-check'"
@@ -344,7 +419,7 @@ cmd_up() {
 down_one() {
     local name="$1"
     local port pidf
-    port="$(surface_port "${name}")"
+    port="$(recorded_or_preferred_port "${name}")"
     pidf="$(pid_file "${name}")"
 
     local pid=""
@@ -377,7 +452,10 @@ down_one() {
         tmux kill-window -t "${SESSION}:${name}" 2>/dev/null || true
     fi
 
-    rm -f "${pidf}" "$(mech_file "${name}")"
+    # The port file goes with the pidfile. A surface that moved to 8788 and then
+    # stopped must not leave 8788 recorded: the next `up` picks its own port, and
+    # a stale record would have `status` reporting a port nothing is on.
+    rm -f "${pidf}" "$(mech_file "${name}")" "$(port_file "${name}")"
 
     # The verification, which is the point of the whole function.
     local waited=0
@@ -445,7 +523,7 @@ cmd_status() {
     local name
     for name in ${SURFACES}; do
         local port log pid state
-        port="$(surface_port "${name}")"
+        port="$(recorded_or_preferred_port "${name}")"
         log="$(log_file "${name}")"
         pid="$(recorded_pid "${name}" || echo '-')"
         if is_running "${name}"; then
@@ -494,7 +572,7 @@ cmd_logs() {
     local existing=""
     local name
     for name in ${names}; do
-        surface_port "${name}" >/dev/null
+        surface_preferred_port "${name}" >/dev/null
         local log
         log="$(log_file "${name}")"
         if [ -f "${log}" ]; then
