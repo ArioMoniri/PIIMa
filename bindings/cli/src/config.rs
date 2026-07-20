@@ -22,6 +22,12 @@
 //! machine. Removing any one of them makes a real deployment impossible, which
 //! is why the off switch is a functional requirement and not a preference.
 //!
+//! The same three-layer order governs the L3 paths — `--model` / `--runtime`,
+//! then `DEID_L3_MODEL` / `DEID_L3_RUNTIME`, then `l3_model` / `l3_runtime` in
+//! the file — and is applied in `src/l3.rs`. It lives there rather than here
+//! because those two settings are paths to a weights file and an executable,
+//! not switches, and resolving them has nothing to do with the updater.
+//!
 //! Note that the precedence is stated in terms of DISABLING. Nothing in this
 //! file can enable auto-update where a lower-precedence layer disabled it,
 //! because there is no `--online` flag and no truthy value of `DEID_NO_UPDATE`
@@ -119,6 +125,10 @@ pub struct EnvView {
     pub xdg_config_home: Option<String>,
     /// `HOME`, the fallback for both.
     pub home: Option<String>,
+    /// `DEID_L3_MODEL`: the local GGUF weights file for the L3 sweep.
+    pub l3_model: Option<String>,
+    /// `DEID_L3_RUNTIME`: the local inference executable for the L3 sweep.
+    pub l3_runtime: Option<String>,
 }
 
 impl EnvView {
@@ -132,6 +142,8 @@ impl EnvView {
             xdg_state_home: get("XDG_STATE_HOME"),
             xdg_config_home: get("XDG_CONFIG_HOME"),
             home: get("HOME"),
+            l3_model: get(crate::l3::ENV_MODEL),
+            l3_runtime: get(crate::l3::ENV_RUNTIME),
         }
     }
 
@@ -192,6 +204,14 @@ pub struct FileConfig {
     pub port: Option<u16>,
     /// `update_public_key`, a minisign public key in base64.
     pub public_key: Option<String>,
+    /// `l3_model`: the local GGUF weights file for the L3 contextual sweep.
+    ///
+    /// A LOCAL PATH and never a host, an endpoint or a repository id. There is
+    /// no key here that can point L3 at something that is not on this disk; see
+    /// `src/l3.rs` for why that is structural rather than a convention.
+    pub l3_model: Option<String>,
+    /// `l3_runtime`: the local inference executable for the L3 sweep.
+    pub l3_runtime: Option<String>,
 }
 
 /// Parse `key = value` lines, `#` to end of line is a comment.
@@ -225,6 +245,8 @@ pub fn parse_file(text: &str) -> Result<FileConfig, ConfigError> {
                 out.port = Some(value.parse().map_err(|_| ConfigError::NotAPort { line })?);
             }
             "update_public_key" => out.public_key = Some(value.to_owned()),
+            "l3_model" => out.l3_model = Some(value.to_owned()),
+            "l3_runtime" => out.l3_runtime = Some(value.to_owned()),
             _ => return Err(ConfigError::UnknownKey { line }),
         }
     }
@@ -484,6 +506,15 @@ mod tests {
         assert_eq!(parsed.host.as_deref(), Some("r.example.invalid"));
         assert_eq!(parsed.port, Some(8443));
         assert_eq!(parsed.public_key.as_deref(), Some("RWQf6"));
+    }
+
+    #[test]
+    fn the_file_parses_the_l3_paths() {
+        let parsed =
+            parse_file("l3_model = \"/opt/m.gguf\"\nl3_runtime = \"/usr/bin/llama-cli\"\n")
+                .expect("valid config");
+        assert_eq!(parsed.l3_model.as_deref(), Some("/opt/m.gguf"));
+        assert_eq!(parsed.l3_runtime.as_deref(), Some("/usr/bin/llama-cli"));
     }
 
     #[test]

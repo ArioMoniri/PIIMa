@@ -54,6 +54,12 @@ export function compose(doc, spans, policy) {
   let output = "";
   let outputBytes = 0;
   let cursor = 0;
+  // The span's ordinal in DOCUMENT ORDER, stamped here rather than recomputed
+  // per view. Four views and the span map all render the same span, and they
+  // have to agree on which one it is: it is the key that links a hovered mark
+  // to its table row, and the order the masking sweep staggers along. Deriving
+  // it separately in each renderer is how those three drift apart.
+  let index = 0;
 
   for (const span of spans) {
     const gap = slice(cursor, span.start);
@@ -73,6 +79,7 @@ export function compose(doc, spans, policy) {
 
     segments.push({
       kind: "span",
+      index: index++,
       span,
       original,
       replacement: applied.text,

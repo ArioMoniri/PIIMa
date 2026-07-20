@@ -34,6 +34,20 @@ crate-type = ["cdylib", "rlib"]
 # `wasm-bindgen-futures` (its only purpose here would be awaiting a JS promise,
 # and the two seams that need async are deliberately shaped so the host awaits,
 # not us -- see the module header of src/lib.rs).
+#
+# `deid-tr-files` IS ADMITTED, and here is the argument for it. The rule above
+# is about what can open a socket, not about how much code is linked. That
+# crate's entire dependency list is `deid-tr-core` and `thiserror`: it names no
+# browser global, contains no `std::fs` call, spawns no subprocess, and carries
+# its own DEFLATE decoder and PKZIP reader precisely so it needs nothing from
+# the registry. Linking it therefore adds nothing to the wasm module's import
+# table, which is the property `tests/no_network.mjs` asserts mechanically -- so
+# the "watch the network tab stay empty" claim is unchanged and still checked
+# against the artifact rather than against this comment.
+#
+# What it DOES cost is bytes, and the panel says so out loud rather than hiding
+# it: see the size note in src/files.rs.
 [dependencies]
 deid-tr-core = { path = "../../core" }
+deid-tr-files = { path = "../files" }
 wasm-bindgen = "0.2"

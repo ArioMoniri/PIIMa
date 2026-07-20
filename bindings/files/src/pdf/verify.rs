@@ -32,7 +32,6 @@
 //! the first place -- see [`crate::pdf::PdfError::UnreadablePage`]. That refusal
 //! is what keeps this verification honest.
 
-use crate::pdf::content;
 use crate::pdf::document::{decode_stream, find_all, Document};
 use crate::pdf::object::Object;
 
@@ -129,9 +128,11 @@ pub fn verify(bytes: &[u8], originals: &[String]) -> Result<(), VerificationFail
         let Some(page) = document.objects.get(page_number).and_then(Object::as_dict) else {
             continue;
         };
-        let (combined, _) = crate::pdf::page_streams(&document, page);
-        let fonts = crate::pdf::page_fonts(&document, page);
-        let text = content::extract(&content::parse(&combined), &fonts).text();
+        // The SAME reader `redact` used, Form XObjects and all. A verifier that
+        // reads less of the page than the redactor did cannot fail, which makes
+        // it a badge rather than a check.
+        let groups = crate::pdf::page_content(&document, page).groups;
+        let text = crate::pdf::extract_groups(&groups).text();
         if let Some(found) = first_match(&text, originals) {
             return Err(VerificationFailure::IdentifierSurvived {
                 index: found,

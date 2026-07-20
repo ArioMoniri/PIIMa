@@ -56,6 +56,13 @@
 //! [`Contextual::sweep`]: deid_tr_core::Contextual::sweep
 //! [`Error`]: deid_tr_core::Error
 
+// WHOLE-FILE redaction: txt, csv, json, jsonl, docx and true PDF redaction,
+// running the same `deid-tr-files` the CLI runs rather than a JavaScript
+// reimplementation. Added as a module rather than folded into the exports
+// above, so the text API's surface is unchanged. See its header for the size
+// cost and for where each of the three PDF safety properties is enforced.
+pub mod files;
+
 use deid_tr_core::context::{prompt, ContextualSweep, LocalModel, SweepConfig};
 use deid_tr_core::surrogate::SurrogateError;
 use deid_tr_core::{

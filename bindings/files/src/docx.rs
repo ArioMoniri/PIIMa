@@ -108,6 +108,13 @@ pub struct DocxOutcome {
     pub fields_cleared: Vec<String>,
     /// How many spans the pipeline removed across all parts.
     pub masked: usize,
+    /// Every part that was SWEPT, with what came out of it.
+    ///
+    /// A superset of [`DocxOutcome::parts_rewritten`]: a part that was read and
+    /// yielded nothing appears here with a count of zero, because "we looked
+    /// and it was clean" and "we never looked" are different facts and a
+    /// surface that cannot tell them apart is not showing a summary.
+    pub part_spans: Vec<(String, usize)>,
 }
 
 /// True when the bytes look like an Office Open XML word processing package.
@@ -171,6 +178,7 @@ pub fn mask(
             outcome.parts_rewritten.push(entry.name.clone());
         }
         outcome.masked += swept.masked;
+        outcome.part_spans.push((entry.name.clone(), swept.masked));
         originals.extend(swept.originals);
         rewritten.push(Entry {
             name: entry.name,
@@ -182,6 +190,77 @@ pub fn mask(
     outcome.fields_cleared.dedup();
     outcome.bytes = zip::write(&rewritten);
     Ok((outcome, originals))
+}
+
+/// One package part's readable text.
+///
+/// `text` IS DOCUMENT TEXT AND THEREFORE PHI, so [`fmt::Debug`] is hand-written
+/// to print a length. `name` is a structural path (`word/document.xml`) and is
+/// safe to print, which is the distinction the derive on [`DocxOutcome`] relies
+/// on and this type cannot.
+///
+/// [`fmt::Debug`]: core::fmt::Debug
+#[derive(Clone, PartialEq, Eq)]
+pub struct PartText {
+    /// The package part path. Structural, safe to print.
+    pub name: String,
+    /// The part's joined character data, exactly as the masker will see it. PHI.
+    pub text: String,
+}
+
+impl core::fmt::Debug for PartText {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PartText")
+            .field("name", &self.name)
+            .field(
+                "text",
+                &format_args!("<{} bytes redacted>", self.text.len()),
+            )
+            .finish()
+    }
+}
+
+/// The readable text of every part [`mask`] would sweep, WITHOUT masking.
+///
+/// For a surface that has to show a reader what it is about to redact. It reuses
+/// `should_sweep`, `clear_known_fields` and `collect_text`, so the parts listed
+/// here and the buffer shown for each are the same parts and the same buffers
+/// [`mask`] hands the pipeline -- not a second, similar-looking reading.
+///
+/// Parts whose joined buffer is blank are omitted: a `.docx` carries a dozen
+/// relationship and settings parts that sweep to nothing, and listing them as
+/// empty rows buries the one part a reader is looking for.
+///
+/// # Errors
+///
+/// [`DocxError`] for a container this crate cannot read.
+pub fn extract_parts(bytes: &[u8]) -> Result<Vec<PartText>, DocxError> {
+    let entries = zip::read(bytes).map_err(DocxError::Container)?;
+    if !entries
+        .iter()
+        .any(|entry| entry.name == "word/document.xml")
+    {
+        return Err(DocxError::NotADocx);
+    }
+    let mut parts = Vec::new();
+    for entry in entries {
+        if !should_sweep(&entry.name) {
+            continue;
+        }
+        let xml = core::str::from_utf8(&entry.data).map_err(|_| DocxError::NotUtf8 {
+            name: entry.name.clone(),
+        })?;
+        let (cleared, _) = clear_known_fields(xml);
+        let (_, joined) = collect_text(&cleared, entry.name.starts_with("word/"));
+        if joined.trim().is_empty() {
+            continue;
+        }
+        parts.push(PartText {
+            name: entry.name,
+            text: joined,
+        });
+    }
+    Ok(parts)
 }
 
 struct Swept {
@@ -214,6 +293,12 @@ fn sweep_part(
 
     let (regions, joined) = collect_text(&out, joins_runs);
     let replacements = masker.replacements(&joined)?;
+    // Every replacement returned here is applied below, so recording them all
+    // is exact. `Masker::replacements` does not record on its own because the
+    // PDF page path reads each page twice and commits a subset.
+    for edit in &replacements {
+        masker.record(edit);
+    }
     let masked = replacements.len();
     let originals: Vec<String> = replacements
         .iter()

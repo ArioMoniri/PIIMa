@@ -22,11 +22,18 @@
 /// `maskfile.rs` joined them with `deid mask-file`, which reads PDFs and DOCX
 /// files: the same footing again, and the same reason the list is enumerated
 /// here rather than inferred.
-const DOCUMENT_MODULES: [(&str, &str); 4] = [
+///
+/// `l3.rs` joined them with the Expert Determination wiring. It never holds the
+/// document itself -- the prompt is built in `core/` and delivered on stdin by
+/// `bindings/llm` -- but it is ON the path that does, and a module that
+/// constructs the contextual layer is exactly where somebody would one day add
+/// "fetch the weights if they are missing".
+const DOCUMENT_MODULES: [(&str, &str); 5] = [
     ("src/mask.rs", include_str!("../src/mask.rs")),
     ("src/batch.rs", include_str!("../src/batch.rs")),
     ("src/format.rs", include_str!("../src/format.rs")),
     ("src/maskfile.rs", include_str!("../src/maskfile.rs")),
+    ("src/l3.rs", include_str!("../src/l3.rs")),
 ];
 
 const MAIN: &str = include_str!("../src/main.rs");

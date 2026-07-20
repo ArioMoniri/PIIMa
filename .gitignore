@@ -18,6 +18,11 @@ tehr/
 .env
 .env.*
 !.env.example
+# Bearer tokens for an exposed deid-serve. deploy/container/compose.yaml mounts
+# secrets/deid_bearer as a Docker secret, and the one thing that must never
+# happen to a credential that authenticates a PHI endpoint is being committed.
+secrets/
+*.bearer
 
 # Rust
 target/
@@ -80,3 +85,12 @@ Thumbs.db
 # from a tree.
 bindings/wasm/pkg/
 bindings/wasm/pkg-web/
+
+# Local-only sample documents. NEVER COMMITTED, NEVER PUBLISHED.
+#
+# Real-world-shaped files used to test the parsers against documents a producer
+# actually emits, rather than only against fixtures we wrote ourselves. Even when
+# a file is synthetic, it does not belong in the repository: the committed corpus
+# is the benchmark, and a document nobody can regenerate cannot be part of it.
+# Drop local samples here and they stay here.
+fixtures-local/

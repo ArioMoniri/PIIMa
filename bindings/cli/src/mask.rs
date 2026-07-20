@@ -63,6 +63,15 @@ pub enum MaskError {
          use `deid mask-file IN --out OUT` if it is a PDF, DOCX, CSV, JSON or JSONL file"
     )]
     UnknownContainer,
+    /// The Expert Determination tier was asked for and L3 could not be wired.
+    ///
+    /// A SEPARATE VARIANT RATHER THAN A FALLBACK. There is no branch anywhere in
+    /// this module that reacts to an L3 failure by running Safe Harbor instead:
+    /// handing back a less-masked document than the caller asked for, without
+    /// saying so, is the worst failure this tool can have. Every spelling of the
+    /// failure names the missing precondition; see `src/l3.rs`.
+    #[error("{0}")]
+    Contextual(#[from] crate::l3::L3Error),
     /// The operating system would not produce key material for the L5 salt.
     ///
     /// FATAL RATHER THAN A DEGRADATION TO LABEL PLACEHOLDERS. A run that
@@ -94,6 +103,36 @@ pub struct Opts {
     pub no_medical_allowlist: bool,
 }
 
+/// Everything the pipeline is built from, in one value.
+///
+/// Grouped rather than passed as three parameters because the three always
+/// travel together and always come from the same place -- the tier chooses
+/// whether L3 runs, `l3` says what it runs, and `opts` says what the caller
+/// opted out of. Splitting them made `run` an eight-argument function whose
+/// call sites were positional soup.
+#[derive(Debug, Clone, Copy)]
+pub struct Build<'a> {
+    /// Which assurance tier was asked for.
+    pub tier: Tier,
+    /// The explicit opt-OUTs.
+    pub opts: Opts,
+    /// The two local paths L3 is built from. Unused outside Expert
+    /// Determination, and required inside it.
+    pub l3: &'a crate::l3::L3Config,
+}
+
+/// Turn a pipeline failure into the most specific thing that can be said.
+///
+/// L3-shaped failures gain the remedy `core/` cannot know -- it has no idea a
+/// `--runtime` flag exists -- and every other failure passes through untouched,
+/// so a span-offset bug is never reported as a model problem.
+pub(crate) fn classify(error: deid_tr_core::Error) -> MaskError {
+    match crate::l3::L3Error::from_core(&error) {
+        Some(l3) => MaskError::Contextual(l3),
+        None => MaskError::Pipeline(error),
+    }
+}
+
 /// Build the pipeline the CLI actually ships.
 ///
 /// THE DEFAULT PATH IS THE SAFE ONE. `Pipeline::new` now carries the audited
@@ -101,12 +140,24 @@ pub struct Opts {
 /// the operating system. Before this, every `deid mask` ran with an empty
 /// allowlist and no surrogate engine: the entire D-010 collision resolution was
 /// unreachable from the binary, and the output was `[LABEL]` placeholders.
-pub(crate) fn build(tier: Tier, opts: Opts) -> Result<Pipeline, MaskError> {
-    let mut pipeline = Pipeline::new(tier);
-    if opts.no_medical_allowlist {
+///
+/// L3 was the same defect one layer up and is fixed the same way: the tier now
+/// installs a real contextual layer instead of naming one that no binary could
+/// construct.
+pub(crate) fn build(spec: &Build<'_>) -> Result<Pipeline, MaskError> {
+    let mut pipeline = Pipeline::new(spec.tier);
+    // L3 IS INSTALLED WHENEVER THE TIER ASKS FOR IT, and its absence is fatal
+    // here rather than at the first document. `Pipeline::propose` would refuse
+    // an Expert Determination run with no contextual layer anyway, but that
+    // refusal arrives with a clinical note already in memory and says only that
+    // none is configured. Failing at build time says which path is missing.
+    if spec.tier == Tier::ExpertDetermination {
+        pipeline = pipeline.with_context(crate::l3::contextual(spec.l3)?);
+    }
+    if spec.opts.no_medical_allowlist {
         pipeline = pipeline.without_medical_allowlist();
     }
-    if !opts.placeholder_labels {
+    if !spec.opts.placeholder_labels {
         let mut key = [0u8; SALT_LEN];
         getrandom::fill(&mut key).map_err(|_| MaskError::Entropy)?;
         // A FRESH SALT PER RUN, which is `SaltScope::Document`, the
@@ -175,19 +226,19 @@ fn refuse_binary_containers(bytes: &[u8], name: Option<&str>) -> Result<(), Mask
 ///
 /// The tier is a parameter because Expert Determination needs a host that can
 /// run a local LLM, and the CLI cannot silently promote a caller into a tier
-/// whose contextual layer is not installed.
+/// whose contextual layer is not installed. `l3` carries the two paths that
+/// layer is built from; when the tier does not ask for L3 they are unused.
 pub fn run(
     path: Option<&str>,
-    tier: Tier,
-    opts: Opts,
+    spec: &Build<'_>,
     format: Format,
     threshold: Option<f32>,
     out: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> Result<(), MaskError> {
     let source = read_input(path)?;
-    let pipeline = build(tier, opts)?;
-    let result = pipeline.deidentify(&source)?;
+    let pipeline = build(spec)?;
+    let result = pipeline.deidentify(&source).map_err(classify)?;
     let rendered = crate::format::render(format, &result, threshold);
 
     // write_all, not a format macro: the guard in scripts/hooks is right that
@@ -237,8 +288,11 @@ mod tests {
         let mut diagnostics = Vec::new();
         run(
             Some(path.to_str().expect("path")),
-            Tier::SafeHarbor,
-            Opts::default(),
+            &Build {
+                tier: Tier::SafeHarbor,
+                opts: Opts::default(),
+                l3: &crate::l3::L3Config::default(),
+            },
             Format::Text,
             None,
             &mut out,
@@ -274,8 +328,11 @@ mod tests {
 
         let err = run(
             Some(path.to_str().expect("path")),
-            Tier::SafeHarbor,
-            Opts::default(),
+            &Build {
+                tier: Tier::SafeHarbor,
+                opts: Opts::default(),
+                l3: &crate::l3::L3Config::default(),
+            },
             Format::Text,
             None,
             &mut Vec::new(),
@@ -318,8 +375,11 @@ mod tests {
     fn a_missing_input_file_is_an_error_that_names_no_content() {
         let err = run(
             Some("/nonexistent/clinical-note.txt"),
-            Tier::SafeHarbor,
-            Opts::default(),
+            &Build {
+                tier: Tier::SafeHarbor,
+                opts: Opts::default(),
+                l3: &crate::l3::L3Config::default(),
+            },
             Format::Text,
             None,
             &mut Vec::new(),
@@ -335,19 +395,47 @@ mod tests {
         // end-to-end statement, through the shipped binary, is in
         // tests/vocabulary_is_reachable.rs -- both exist because a builder that
         // is correct and never called is exactly what was wrong here.
-        let pipeline = build(Tier::SafeHarbor, Opts::default()).expect("build");
+        let l3 = crate::l3::L3Config::default();
+        let pipeline = build(&Build {
+            tier: Tier::SafeHarbor,
+            opts: Opts::default(),
+            l3: &l3,
+        })
+        .expect("build");
         assert!(pipeline.allowlist().contains("costa"));
         assert!(pipeline.surrogate().is_some());
 
-        let opted_out = build(
-            Tier::SafeHarbor,
-            Opts {
+        let opted_out = build(&Build {
+            tier: Tier::SafeHarbor,
+            opts: Opts {
                 placeholder_labels: true,
                 no_medical_allowlist: true,
             },
-        )
+            l3: &l3,
+        })
         .expect("build");
         assert!(!opted_out.allowlist().contains("costa"));
         assert!(opted_out.surrogate().is_none());
+    }
+
+    #[test]
+    fn the_expert_tier_refuses_to_build_rather_than_becoming_safe_harbor() {
+        // The property that matters more than the message: an unconfigured L3
+        // yields NO PIPELINE. There is no value of the arguments on which this
+        // returns a Safe Harbor pipeline, so there is nothing for a caller to
+        // accidentally mask a document with.
+        // `Pipeline` has no `Debug`, so the Ok side is discarded explicitly
+        // rather than through `expect_err`.
+        let built = build(&Build {
+            tier: Tier::ExpertDetermination,
+            opts: Opts::default(),
+            l3: &crate::l3::L3Config::default(),
+        });
+        let error = match built {
+            Ok(_) => panic!("expert with no model must not build a pipeline"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, MaskError::Contextual(_)));
+        assert!(error.to_string().contains("--model"));
     }
 }

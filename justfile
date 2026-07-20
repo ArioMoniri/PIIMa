@@ -8,6 +8,13 @@ set shell := ["bash", "-uc"]
 
 python := "python3"
 airgap_dir := ".airgap"
+dist_dir := "dist"
+
+# The three shippable native binaries, and the cargo packages that produce them. Kept in one
+# place because `build-all`, `package` and `install` must agree on what "every artifact" means;
+# three separate lists is three chances for one of them to quietly ship two of the three.
+bins := "deid deid-mcp deid-serve"
+bin_pkgs := "-p deid-tr-cli -p deid-tr-mcp -p deid-tr-service"
 
 # List every recipe. Entry point for anyone new to the repo.
 default:
@@ -700,3 +707,387 @@ _serve page:
     http.server.HTTPServer(("127.0.0.1", 8722),
         functools.partial(Handler, directory=".")).serve_forever()
     PY
+
+# ---------------------------------------------------------------------------
+# Build and packaging: one command per artifact class, no shell history.
+# ---------------------------------------------------------------------------
+
+# Build every shippable artifact.
+#
+# WHY one recipe rather than "run these four": a release built by remembering four commands is a
+# release that ships three of them. The header of this file says a command not in here does not
+# exist; the corollary is that "everything" has to be a command too.
+#
+# WHY the wasm side SKIPS rather than fails, when the rest of this file makes missing toolchains
+# fatal: `just build-wasm` is a recipe someone ran on purpose, so failing tells them the thing
+# they asked for cannot happen. `build-all` is the entry point for a contributor who just wants
+# the native binaries, and hard-failing there makes the wasm toolchain a de facto prerequisite
+# for touching core/. The rule this file holds is not "never skip" - it is never skip SILENTLY.
+# Every skip below prints what was skipped, why, and the exact command that un-skips it, and the
+# closing report lists it again so it cannot scroll past unread.
+#
+# Build every shippable artifact and report what was built and what was skipped.
+build-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    built=()
+    skipped=()
+
+    echo "build-all: native binaries (release)"
+    cargo build --release {{bin_pkgs}}
+    for b in {{bins}}; do
+        # Asserted rather than assumed: a rename in a [[bin]] section makes cargo succeed while
+        # producing a binary under a name that package/ and install/ will not find, and the
+        # first symptom would otherwise be an empty bundle.
+        if [ ! -x "target/release/${b}" ]; then
+            echo "build-all: FAIL - cargo succeeded but target/release/${b} does not exist." >&2
+            echo "  The [[bin]] name in bindings/*/Cargo.toml no longer matches 'bins' in this" >&2
+            echo "  justfile. Fix one of the two; they are the same list in two places." >&2
+            exit 1
+        fi
+        built+=("target/release/${b}")
+    done
+
+    # The browser surface. Two things gate it and they fail differently, so they are reported
+    # separately: a missing rustup target is one command away, a missing bindgen is another.
+    wasm_skip=""
+    if ! rustup target list --installed 2>/dev/null | grep -qx wasm32-unknown-unknown; then
+        wasm_skip="the wasm32-unknown-unknown target is not installed (fix: rustup target add wasm32-unknown-unknown)"
+    elif ! command -v wasm-pack >/dev/null 2>&1 && ! command -v wasm-bindgen >/dev/null 2>&1; then
+        wasm_skip="neither wasm-pack nor wasm-bindgen is installed (fix: cargo install wasm-pack, or cargo install wasm-bindgen-cli)"
+    fi
+    if [ -z "${wasm_skip}" ]; then
+        echo
+        echo "build-all: wasm module + panel bundle"
+        # Delegated rather than duplicated: build-wasm already encodes which two targets are
+        # built and why (web for the panel, nodejs for the no-upload proof). A second copy of
+        # that here is a second copy to forget to update.
+        just build-wasm
+        built+=("bindings/wasm/pkg-web/deid_tr_wasm_bg.wasm")
+        built+=("bindings/wasm/pkg/deid_tr_wasm_bg.wasm")
+        # The panel is static source, so it is not "built" - but it is unusable without the
+        # module it loads from ../pkg-web/, so its readiness is exactly the wasm build's.
+        built+=("bindings/wasm/panel/ (static; loads ../pkg-web/)")
+    else
+        skipped+=("wasm module + panel bundle: ${wasm_skip}")
+    fi
+
+    echo
+    echo "=============================================================================="
+    echo "BUILD REPORT"
+    echo "=============================================================================="
+    echo "built:"
+    for a in "${built[@]}"; do echo "  + ${a}"; done
+    if [ ${#skipped[@]} -eq 0 ]; then
+        echo "skipped: nothing"
+    else
+        echo "skipped:"
+        for s in "${skipped[@]}"; do echo "  - ${s}"; done
+        echo
+        echo "The native side is complete. 'just package' will REFUSE to build a bundle while"
+        echo "anything above is skipped, because a distributable missing a surface is worse"
+        echo "than no distributable."
+    fi
+    echo
+    echo "This build masks NO NAMES: L2 has no trained model and no weights ship. See"
+    echo "deploy/BUNDLE_README.md, or run: ./target/release/deid doctor"
+
+# Assemble a versioned, checksummed, distributable bundle in dist/.
+#
+# WHY it refuses when build-all skipped something: `build-all` skips so a contributor can work.
+# `package` produces the thing a hospital downloads, and a tarball that quietly lacks the browser
+# panel would be discovered by whoever unpacked it expecting one. Fail here, loudly, where the
+# person who can install the toolchain is standing.
+#
+# WHY the mtimes get flattened and gzip runs with -n: same inputs must give the same tarball
+# bytes, and otherwise the archive differs on every run purely from build timestamps, directory
+# order, and the mtime gzip stamps into its own header. That is not full bit-for-bit
+# reproducibility across machines - the compiler decides that, not this recipe - but it removes
+# the incidental nondeterminism that makes comparing two bundles impossible before you even get
+# to the interesting question.
+#
+# Assemble the versioned, checksummed release bundle in dist/.
+package: build-all
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [ ! -f bindings/wasm/pkg-web/deid_tr_wasm_bg.wasm ]; then
+        echo "package: FAIL - no browser panel build (bindings/wasm/pkg-web/)." >&2
+        echo "  'just build-all' skipped it; see the reason it printed. A release bundle" >&2
+        echo "  ships every surface or it is not a release bundle. Install the wasm" >&2
+        echo "  toolchain and re-run." >&2
+        exit 1
+    fi
+
+    version="$(awk -F'"' '/^\[workspace\.package\]/{f=1} f && /^version[[:space:]]*=/{print $2; exit}' Cargo.toml)"
+    if [ -z "${version}" ]; then
+        echo "package: FAIL - could not read version from [workspace.package] in Cargo.toml." >&2
+        echo "  An unversioned bundle is a bundle nobody can say they are running, which is" >&2
+        echo "  the first question asked about a tool that handled a patient record." >&2
+        exit 1
+    fi
+    target="$(rustc -vV | awk '/^host:/{print $2}')"
+    commit="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+        commit="${commit}-dirty"
+    fi
+    name="deid-tr-${version}-${target}"
+    stage="{{dist_dir}}/${name}"
+
+    # Rebuilt from scratch every time: an incremental staging directory keeps files that a
+    # rename deleted from the build, and the bundle then ships an artifact that no longer exists
+    # in the tree it claims to come from.
+    rm -rf "${stage}"
+    mkdir -p "${stage}/bin" "${stage}/panel" "${stage}/pkg-web"
+
+    for b in {{bins}}; do
+        install -m 0755 "target/release/${b}" "${stage}/bin/${b}"
+    done
+    cp bindings/wasm/panel/* "${stage}/panel/"
+    cp bindings/wasm/pkg-web/* "${stage}/pkg-web/"
+    install -m 0644 LICENSE "${stage}/LICENSE"
+
+    # The bundle README is a template, not prose generated here: what does and does not work is
+    # a claim about the product, and a claim about the product belongs in a file a reviewer can
+    # read in a diff rather than inside a shell heredoc in a build script.
+    sed -e "s|@@VERSION@@|${version}|g" \
+        -e "s|@@TARGET@@|${target}|g" \
+        -e "s|@@COMMIT@@|${commit}|g" \
+        deploy/BUNDLE_README.md > "${stage}/README.md"
+
+    # An array rather than a shell function because the checksum command is invoked through
+    # xargs below, and xargs execs a real binary - it cannot see a function.
+    if command -v shasum >/dev/null 2>&1; then
+        sha_cmd=(shasum -a 256)
+    elif command -v sha256sum >/dev/null 2>&1; then
+        sha_cmd=(sha256sum)
+    else
+        echo "package: FAIL - neither shasum nor sha256sum is available." >&2
+        echo "  A bundle nobody can verify is a binary of unknown origin. Fails closed." >&2
+        exit 1
+    fi
+
+    # Paths are relative to the bundle root so `shasum -a 256 -c SHA256SUMS` works after the
+    # user extracts it wherever they extract it.
+    ( cd "${stage}" && find . -type f ! -name SHA256SUMS | LC_ALL=C sort | xargs "${sha_cmd[@]}" > SHA256SUMS )
+
+    # 2020-01-01T00:00:00Z: an arbitrary fixed instant. Any constant works; what matters is that
+    # it is not "now".
+    find "${stage}" -exec touch -t 202001010000.00 {} +
+
+    tarball="{{dist_dir}}/${name}.tar.gz"
+    rm -f "${tarball}"
+    ( cd "{{dist_dir}}" && find "${name}" -print | LC_ALL=C sort \
+        | tar -cf - --no-recursion -T - ) | gzip -n > "${tarball}"
+
+    ( cd "{{dist_dir}}" && "${sha_cmd[@]}" "${name}.tar.gz" > SHA256SUMS )
+
+    echo
+    echo "=============================================================================="
+    echo "BUNDLE: ${tarball}"
+    echo "=============================================================================="
+    echo "  version ${version}   target ${target}   source ${commit}"
+    echo
+    echo "Contents (${stage}/SHA256SUMS):"
+    sed 's/^/  /' "${stage}/SHA256SUMS"
+    echo
+    echo "Archive ({{dist_dir}}/SHA256SUMS):"
+    sed 's/^/  /' "{{dist_dir}}/SHA256SUMS"
+    echo
+    echo "Record the archive checksum OUT OF BAND - somewhere that is not this tarball and not"
+    echo "the server that will serve it. A checksum shipped beside the file it checksums proves"
+    echo "only that the file did not corrupt in transit."
+    echo
+    echo "NO MODEL WEIGHTS ARE BUNDLED. There are none to bundle, for any layer, and 'deid pull'"
+    echo "is not implemented. This build masks NO NAMES. Both are stated in the bundle README so"
+    echo "nobody unpacks this looking for a model directory that was never going to be there."
+
+# Install the built binaries to PREFIX (default ~/.local/bin).
+#
+# WHY ~/.local/bin and not /usr/local/bin: the default must not need sudo. A tool whose install
+# step asks for root is a tool that gets installed by pasting a root shell command found on the
+# internet, and this one reads patient records.
+#
+# WHY it prints every path it wrote: this recipe puts executables on someone's PATH. The set of
+# things that appear on your PATH without telling you should be empty.
+#
+# Install the binaries to PREFIX (default ~/.local/bin). No sudo, idempotent.
+install prefix="~/.local/bin": build-all
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Expanded here rather than by just, whose variable substitution does not do tilde expansion
+    # and would create a literal './~' directory.
+    prefix="$(eval echo "{{prefix}}")"
+    mkdir -p "${prefix}"
+    if [ ! -w "${prefix}" ]; then
+        echo "install: FAIL - ${prefix} is not writable by this user." >&2
+        echo "  This recipe never escalates. Choose a writable prefix instead:" >&2
+        echo "      just install ~/.local/bin" >&2
+        exit 1
+    fi
+    echo "installed:"
+    for b in {{bins}}; do
+        # install(1) rather than cp: it replaces the target atomically and sets the mode
+        # explicitly, so re-running over a binary that is currently executing does not produce
+        # a half-written file, and the result does not depend on the umask of whoever ran it.
+        # That is what makes this recipe idempotent rather than merely repeatable.
+        install -m 0755 "target/release/${b}" "${prefix}/${b}"
+        echo "  ${prefix}/${b}"
+    done
+    case ":${PATH}:" in
+        *":${prefix}:"*) ;;
+        *)
+            echo
+            echo "NOTE: ${prefix} is not on your PATH, so the names above will not resolve."
+            echo "  Add this to your shell profile:"
+            echo "      export PATH=\"${prefix}:\$PATH\""
+            ;;
+    esac
+    echo
+    echo "This build masks NO NAMES. Run 'deid doctor' for this machine's layer report."
+
+# Print the MCP client configuration block. Does NOT write it anywhere.
+#
+# WHY print and never edit: the config file belongs to a client outside this repository, and
+# rewriting somebody's editor or assistant configuration from a build recipe is a surprise. This
+# tool's entire posture is that surprises are the defect - a de-identifier that does something
+# you did not ask for is a de-identifier you cannot reason about. So it hands you the exact text
+# and stops, and you decide where it goes.
+#
+# WHY the absolute path is interpolated rather than left as a placeholder: a relative command
+# path resolves against whatever working directory the client happens to have, and the failure
+# looks like the server hanging rather than a missing file. The one detail most likely to be
+# pasted wrong is the one this recipe fills in.
+#
+# Print the MCP client config block for this checkout. Writes nothing.
+register-mcp:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bin="$(pwd)/target/release/deid-mcp"
+    if [ ! -x "${bin}" ]; then
+        echo "register-mcp: ${bin} does not exist." >&2
+        echo "  Build it first: just build-all   (or: just mcp-build)" >&2
+        echo "  Refusing to print a config pointing at a binary that is not there - the" >&2
+        echo "  client's failure mode for a missing command is nearly silent." >&2
+        exit 1
+    fi
+    cat <<EOF
+    ==============================================================================
+    MCP REGISTRATION - deid-tr
+    ==============================================================================
+    Nothing below has been written to any file. Paste it yourself.
+
+    The gateway is LAUNCHED BY THE CLIENT and speaks newline-delimited JSON-RPC on
+    stdin/stdout. It is not a service you start and connect to, and it cannot open
+    a socket at all - that is what makes it safe for it to hold the span map.
+
+    --- Claude Code ------------------------------------------------------------
+    Run:
+
+        claude mcp add deid-tr -- ${bin} --tier safe-harbor --session-ttl 900
+
+    --- Any client using the standard mcpServers config -------------------------
+    Add this block, merging into an existing "mcpServers" object if there is one:
+
+    {
+      "mcpServers": {
+        "deid-tr": {
+          "command": "${bin}",
+          "args": ["--tier", "safe-harbor", "--session-ttl", "900"]
+        }
+      }
+    }
+
+    It goes in that client's own config file. Common locations:
+
+      Claude Desktop (macOS)   ~/Library/Application Support/Claude/claude_desktop_config.json
+      Claude Desktop (Linux)   ~/.config/Claude/claude_desktop_config.json
+      Claude Desktop (Windows) %APPDATA%\\Claude\\claude_desktop_config.json
+      Claude Code (project)    .mcp.json in the project root
+      Cursor                   ~/.cursor/mcp.json  (or .cursor/mcp.json per project)
+      VS Code / Continue       the "mcpServers" block of that extension's settings
+
+    Restart the client after editing; these files are read at startup.
+
+    --- Before you send anything real -----------------------------------------
+    Call the 'health' tool. It reports which layers are live in the process you
+    just started, not which ones are supposed to be.
+
+    THIS BUILD MASKS NO NAMES. L2 has no trained model, so PATIENT_NAME,
+    CLINICIAN_NAME and RELATIVE_NAME pass through untouched. TCKN, VKN, SGK,
+    IBAN, phone, MRN, email and dates are masked. Do not treat the output as
+    Safe Harbor compliant.
+    ==============================================================================
+    EOF
+
+# ---------------------------------------------------------------------------
+# Deployment. The default is the safe one; the unsafe one is loud and typed out.
+#
+# WHY these two recipes and not a docs page: a deployment procedure that lives in
+# prose is a procedure whose steps get skipped in the order they are boring. The
+# preflight is the step most worth skipping and least safe to skip, so it is a
+# command with an exit code rather than a checklist with a checkbox.
+#
+# docs/DEPLOY-SERVER.md is the reasoning. These are the two commands it leads with.
+# ---------------------------------------------------------------------------
+
+# Run the service on THIS machine, bound to 127.0.0.1. The default deployment.
+#
+# WHY the command is echoed before it runs: this is the line an operator copies into a runbook,
+# a systemd unit or a compose file, and the copy they make should be of the SAFE invocation
+# rather than of whatever they reconstruct from memory later. Printing it also means the
+# loopback bind is visible on their terminal even though they typed no flag to get it - a
+# default nobody can see is a default nobody trusts, and the first thing an untrusting operator
+# does is add flags.
+#
+# ARGS is forwarded so a local run can pick a port or a tier. It cannot reach an all-interfaces
+# bind: deid-serve refuses that unconditionally, with --expose, with a token, with both.
+#
+# Run deid-serve on 127.0.0.1. The default, and the one docs/DEPLOY-SERVER.md leads with.
+deploy-local *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release -p deid-tr-service
+    bin="$(pwd)/target/release/deid-serve"
+    echo
+    echo "deploy-local: running exactly this command --"
+    echo
+    echo "    ${bin} --host 127.0.0.1 --port 8787 {{ARGS}}"
+    echo
+    echo "  Bound to loopback. No other machine can reach it, and no flag in this"
+    echo "  repository makes it reachable by accident. Ctrl-C to stop."
+    echo "  THIS BUILD MASKS NO NAMES: run 'just deploy-check' for the full coverage report."
+    echo
+    exec "${bin}" --host 127.0.0.1 --port 8787 {{ARGS}}
+
+# The preflight a human runs BEFORE exposing anything.
+#
+# WHY it is a wrapper around `deid-serve preflight` rather than a shell script that re-checks
+# the rules: the rules live in bindings/service/src/bind.rs and the coverage report is read from
+# a REAL pipeline built from the same flags. A bash re-implementation would be a second source
+# of truth for "does this bind get refused" and "are names masked", and the copy that goes stale
+# is always the one that says yes.
+#
+# Exits non-zero on any FAIL. Warnings - no TLS, no L2 model - do not fail it: they are true of
+# every correct deployment too, and a check that fails on the correct default is a check people
+# learn to suppress.
+#
+# Preflight a deployment: bind, token, TLS, and which layers are actually live.
+deploy-check *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release --quiet -p deid-tr-service
+    echo "deploy-check: nothing is started and no socket is created."
+    echo
+    # `set -e` would swallow the exit code we specifically want to propagate.
+    set +e
+    ./target/release/deid-serve preflight {{ARGS}}
+    status=$?
+    set -e
+    echo
+    if [ "${status}" -ne 0 ]; then
+        echo "deploy-check: FAIL. Do not deploy this. docs/DEPLOY-SERVER.md explains each refusal." >&2
+        exit "${status}"
+    fi
+    echo "deploy-check: no blocking findings. Read the WARN lines before you proceed --"
+    echo "  they are the ones that are true of correct deployments as well as broken ones."

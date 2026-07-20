@@ -1854,3 +1854,291 @@ writes one to disk.
   D-027's and it is unchanged.
 - Both measurements remain averages over a mixed corpus, and D-023's caveat about eponym-dense
   documents still applies unchanged.
+
+---
+
+## D-038 — The Expert Determination tier is wired to the CLI behind two explicit local paths, and fails loudly rather than degrading
+
+**Context.** `Tier::ExpertDetermination` -> `Contextual` -> `ContextualSweep<M: LocalModel>` ->
+`LocalGgufModel` was complete and tested — `bindings/llm` covers the whole path with `MockRunner`,
+including the property that the document travels on stdin and never in argv. And no shipped binary
+could construct it, because `bindings/cli/Cargo.toml` did not depend on `deid-tr-llm`.
+`deid mask --tier expert` therefore failed with "the Expert Determination tier requires a
+contextual (L3) layer, none configured" on a machine that had both a model and a runtime installed.
+
+This is the fourth instance of the same class in this repository: `bindings/files` had no consumer
+(see the `mask-file` entry in PROGRESS), the bundled allowlist was built and unreachable, D-029 and
+D-037 are the same shape. The recurring defect is not any one missing line — it is that a component
+with green tests reads as done. A test that constructs its own pipeline cannot see it; only a test
+that execs the artifact a hospital installs can.
+
+**Decision.**
+
+1. `bindings/cli` depends on `deid-tr-llm`. That crate declares exactly one dependency
+   (`deid-tr-core`) and permanently bans every HTTP client and cloud SDK in its own manifest, so
+   admitting it opens no socket and forces no registry resolve; `just test-airgapped` is unaffected.
+2. L3 is configured by two LOCAL PATHS and nothing else: `--model FILE.gguf` and `--runtime BIN`,
+   with `DEID_L3_MODEL` / `DEID_L3_RUNTIME` and `l3_model` / `l3_runtime` as the env and config-file
+   equivalents, resolved flag > env > config file per path. There is no host, endpoint, token or
+   download anywhere in the surface. I1 is unchanged and no exception was added to
+   `guard_invariants.sh`.
+3. Every precondition gets its OWN message naming what is missing and what to do: no model
+   configured, no runtime configured, model file absent, runtime absent, runtime not executable
+   (with the `chmod +x` that fixes it), runtime exited non-zero, response not the requested JSON.
+   A generic "L3 unavailable" is indistinguishable from a design limitation, and an operator who
+   concludes the tier does not work runs Safe Harbor instead.
+4. **No silent degradation, ever.** Expert Determination is refused at pipeline BUILD time, before
+   a document is read, and stdout is empty on every failure. Returning a less-masked document than
+   the caller asked for without saying so is the worst failure this tool can have.
+5. `deid doctor` reports per layer what is and is not available on THIS machine with the exact
+   command to close each gap — including the fact that L2 has no model, so `deid` masks ZERO names
+   at any tier, `--tier expert` included.
+
+**Alternatives rejected.**
+
+- *Discover a model by convention* (a well-known path, `~/.cache`, an env-var-free default). A tool
+  that finds weights by itself is a tool that can find the wrong weights, and an audit record that
+  pins a model nobody chose pins nothing.
+- *Fall back to Safe Harbor with a warning on stderr.* Rejected outright. Warnings scroll past, exit
+  code zero does not, and the output would be a document that looks swept and is not.
+- *Put the L3 paths in `config::resolve` alongside the updater switches.* They are paths to a
+  weights file and an executable, not vetoes, and the updater's one-way "every layer may veto, none
+  may un-veto" rule does not apply to them. Mixing the two would have made that rule read as
+  governing L3 as well.
+
+**Consequences.**
+
+- The errors in `src/l3.rs` NAME PATHS, which the rest of the CLI deliberately refuses to do. That
+  exception is bounded and reasoned: `mask.rs` and `batch.rs` hide paths because a clinical export
+  is routinely named after the patient, while these two name a weights file and an inference binary
+  chosen by whoever installed the tool. An error that does not say which path is missing cannot be
+  acted on, and an operator who cannot act works around the tier.
+- `mask::build` now takes a `Build` struct rather than three positional arguments. That was forced
+  by the argument count, and the grouping is honest: tier, opt-outs and L3 paths always travel
+  together.
+- Determinism is unchanged and still not bitwise across backends (the open issue L3 already had).
+  The seed is a constant rather than a flag, and the audit config records the weights FILE NAME
+  (not the full path, which identifies this machine's layout), `local-process` as the backend
+  because this binding genuinely does not know which execution provider the runtime chose, and the
+  GGUF quantization tag from the file name or `unlabelled` when the name does not carry one. A
+  guessed quantization would make two incomparable runs look comparable.
+- Still unmeasured. Contextual coverage against our own corpus remains 0.0000 because no model has
+  been selected and evaluated — the layer runs, nothing has been run through it. `docs/COMPARISON.md`
+  says exactly that rather than upgrading the row to a capability.
+
+## ADR: the PDF single-byte font fallback is Windows-1254, unconditionally
+
+**Context.** `bindings/files/src/pdf/font.rs` decoded a simple font (Type1/TrueType with
+`/WinAnsiEncoding` or no `/Encoding`) with `char::from_u32(code)`, which is Latin-1. Windows-1254
+and Latin-1/Windows-1252 are identical except at six byte positions -- `0xD0 0xDD 0xDE 0xF0 0xFD
+0xFE` -- and those six ARE `Ğ İ Ş ğ ı ş`. So every Turkish letter in a Turkish PDF was corrupted
+before detection ran, and a test named `a_simple_font_falls_back_to_latin1` pinned it.
+
+`bindings/files/src/txt.rs` had already made and documented the opposite call for `.txt` input.
+The knowledge existed in one path and never reached the other.
+
+**Decision.** Always decode the single-byte fallback through `txt::cp1254_to_char`, with no
+sniffing. Sniffing is circular here: the evidence a detector would weigh is the decoded text it is
+trying to produce, it would have to decide per font from a few bytes, and a wrong verdict is
+silent. The six bytes only ever mean one thing in a Turkish clinical tool. Undefined Windows-1254
+positions return `None` rather than `U+FFFD`, so they route to the existing UNREADABLE-page
+refusal instead of becoming a guess. `txt.rs` keeps the only copy of the table.
+
+Separately, `/Differences` glyph names for the Turkish letters (`dotlessi`, `Idotaccent`,
+`scedilla`, `gbreve` and cases) were missing from `glyph_name_to_char`, so a font that EXPLICITLY
+declared `253 /dotlessi` had that statement dropped and fell through to the code page anyway.
+
+**Residual risk, accepted.** A genuinely Icelandic or Faroese document is decoded wrongly at
+`Ð ð Þ þ Ý ý`. Those letters carry no Turkish identifier information, the tool is scoped to Turkish
+clinical text, and only one direction of this trade loses names (I2).
+
+## ADR: page text is read from Form XObjects, each with its own font scope
+
+**Context.** `page_streams` read only a page's `/Contents`. Several widely-deployed producers
+(HiQPdf and the Crystal/Telerik lineage) emit an entire report body as a Form XObject and leave the
+page stream holding little more than a `Do`. The Type0 fonts live in the FORM's `/Resources`, so
+`/ToUnicode` never reached the strings that needed it and the body was simply never read -- the
+page extracted to near-nothing and redaction reported a clean document over text it had not looked
+at.
+
+**Decision.** `page_content` returns a list of `ContentGroup`s: the page's `/Contents` array as one
+group (still concatenated, per 7.8.2), then each reachable Form XObject as its own group with its
+own font table, depth-capped at 8 with a visited set for cycles. `Extraction::absorb` concatenates
+the per-group extractions with source ranges shifted, so provenance and redaction write-back are
+unchanged. `verify.rs` uses the same reader, because a verifier that reads less of the page than
+the redactor did cannot fail.
+
+**Rejected: one buffer with a merged font table.** A form's `/F1` and a page's `/F1` are different
+fonts. Merging decodes one with the other, silently. For the same reason a form that HAS its own
+`/Resources` is authoritative: a font name it does not define is left undefined and the page
+refuses, rather than borrowing a same-named page font. Only a form with NO `/Resources` inherits
+the page's (8.10.1).
+
+---
+
+## D-039 — A page carrying BOTH text and images is refused by default, and `--allow-images` buys continuation rather than silence
+
+- **Date:** 2026-07-20
+- **Status:** ACCEPTED
+
+**Context.** D-033 refuses a page with NO extractable text: its identifiers are pixels, this crate
+has no OCR, and a text-extraction check over such a page returns "no PHI found" vacuously. That
+rule only ever fired on the all-or-nothing case. Measured on a synthetic Turkish `muayene raporu`
+in `fixtures-local/` (never committed): one page, a real text layer, and image XObjects at 102x102
+and 320x38. The tool masked 15 spans, stripped `/AcroForm`, reported success, and said **nothing**
+about the images; all of them survived byte-identical into the output. The hybrid page is not an
+edge case — it is the ordinary shape of hospital output, and it was falling between two policies
+into the least safe path in the product.
+
+The specific harm is not hypothetical. A 102x102 image in a Turkish clinical report is very often a
+QR or barcode, and those routinely encode the protokol or patient number — a direct identifier under
+this project's own schema. A 320x38 is usually a signature or a letterhead.
+
+**Decision.**
+1. Images on any page that is otherwise processed are detected and reported by **page number, count
+   and pixel dimensions** (`pdf::PageImages`). Never silently passed.
+2. The default is **refusal** (`pdf::ImagePolicy::Refuse` → `PdfError::PageCarriesImages`).
+3. `--allow-images` (CLI), `allowImages` (wasm) switches to `ImagePolicy::Warn`: the file is
+   produced AND the identical page-and-dimension list is printed beside it, under
+   `Report::images_not_read()`. There is no third setting and no setting under which the images go
+   unmentioned.
+4. Size is used to label a line — `PageImage::plausible_decoration`, edge ≤ 16px — and the message
+   says in words that the distinction is a heuristic. Nothing decodes an image, so nothing claims to
+   know what one contains. An image whose size cannot be read is never called decorative.
+5. The D-033 scanned-page refusal is untouched and unconditional: `--allow-images` does not reach
+   it. That page has nothing to redact, so continuing would produce a vacuously clean output.
+
+**Alternatives considered.**
+1. Warn and continue by default, refuse never.
+2. Refuse only images above a size threshold, pass the rest silently.
+3. The chosen policy: refuse everything, one explicit override, report either way.
+
+**Rationale.** Option 1 was the starting position and loses on I2: a missed identifier is a breach,
+an over-mask is a papercut, and a QR code carrying the protokol number is a missed identifier inside
+a file that says "redacted" on it. It also leaves this crate refusing a whole-page scan while
+quietly passing an embedded barcode encoding the same number — not a considered position, just the
+seam between two rules.
+
+Option 2 is the tempting one and is rejected because **the heuristic is not strong enough to
+decide**. A QR code is legible to a scanner at sizes where nothing is legible to a person, so any
+threshold that auto-passes is auto-passing something that may be a patient number. Worse, it is a
+decision the user never sees. The heuristic is honest enough to inform a human and nowhere near good
+enough to approve on their behalf, and it is used accordingly.
+
+The counter-argument to option 3 is real and is answered rather than dismissed: refusing every
+document with a letterhead logo would make the tool unusable. So the override is one flag, it is
+named inside the refusal itself, and taking it does not buy quiet. A user who overrides knows what
+they overrode; a user who does not gets no file. Neither can end up believing pixels were read.
+
+**Consequences.**
+- Most real hospital PDFs now refuse on first run. That is friction, it will be felt as the tool
+  being broken, and it is the correct direction: the alternative was a file that looked finished.
+- `mask_file`/`extract` keep their signatures and default to refusal; `mask_file_with`/`extract_with`
+  take an `Options`. The preview path in the wasm binding must re-read the output under the SAME
+  options, or a warned file loses its preview as a side effect of having been warned about.
+- Detection walks inherited `/Resources` up the page tree and descends into Form XObjects
+  (depth-capped, visited set), because a letterhead declared on the `/Pages` node or wrapped in a
+  form is the ordinary way one is stored. Image XObjects are counted per OBJECT, so one image drawn
+  twice is one image.
+- Inline images (`BI`) are counted with an UNKNOWN size rather than skipped. An unknown size never
+  reads as a small one.
+- Still not closed: this says nothing about what any image contains, and it cannot. It converts a
+  silent pass into a loud, specific statement — that is all it does, and the doc row in
+  `docs/COMPARISON.md` says so where the guarantee is stated.
+
+## D-040 — An all-interfaces bind is refused unconditionally, including inside a container network namespace
+
+- **Date:** 2026-07-20
+- **Status:** ACCEPTED
+
+**Context.** D-035 established that `deid-serve` binds loopback by default and that exposure needs
+three deliberate acts. It left one thing implicit that the deployment work made explicit: whether
+`--expose` plus a bearer token is enough to unlock an ALL-INTERFACES address, or whether that
+address is refused outright. Shipping `deploy/` forced the question, because a container is exactly
+where the argument for allowing it is strongest.
+
+That argument is not weak. A container's network namespace is already isolated; the container has
+one interface; "all interfaces" inside it means one interface. Docker forwards a published port to
+the container's bridge address, not its loopback, so a process bound to the container's loopback is
+unreachable under bridge networking. Every mainstream image binds all interfaces inside the
+container and relies on the publish to control host-side reachability, and for most software that is
+correct engineering rather than laziness.
+
+**Decision.** An address that binds every interface is refused **unconditionally** by
+`bind::plan`. There is no flag, environment variable, configuration file or container setting that
+reaches one -- not `--expose`, not a bearer token, not both. `--expose` requires naming a SPECIFIC
+interface address. Three details that make this real rather than nominal:
+
+1. The check is a predicate over the parsed address, not a string comparison, so every spelling is
+   covered: the dotted quad, its zero-padded forms, the IPv6 unspecified address, and -- added in
+   this change after a test caught it -- the **IPv4-mapped IPv6 form**, `::ffff:` in front of the
+   IPv4 all-interfaces address. `Ipv6Addr::is_unspecified` returns FALSE for that one, and on any
+   host that has not set `IPV6_V6ONLY` it binds every IPv4 interface. `bind::canonical` collapses
+   IPv4-mapped addresses before any rule is applied, so a spelling now gets the same answer as the
+   address it denotes, in both directions: `::ffff:127.0.0.1` is loopback and needs no flag.
+2. `argv` is the only configuration channel. The crate reads no environment variable and parses no
+   configuration file, and `no_deployment_path_binds_all_interfaces.rs` asserts both by scanning for
+   `env::var` and for file reads outside the one credential path.
+3. Every shipped deployment file is scanned by that same test for an all-interfaces address, and
+   every published port in `compose.yaml` must parse to a loopback host address.
+
+**Alternatives considered.**
+1. Allow it when `--expose` and a token are both present -- treat it as one more non-loopback address.
+2. Allow it only when the process can detect it is inside a container.
+3. Refuse it unconditionally, and give the container case a different answer.
+
+**Rationale.** Option 1 collapses the distinction that carries all the weight. "Bind this one
+address I named" is a statement about topology the operator has thought about; "bind everything,
+including the interfaces you did not know this machine had" is not a statement about topology at
+all. A clinical workstation has a wired NIC, a wireless NIC, a VPN tunnel and often a stale
+virtualisation bridge, and the operator was thinking about exactly one of them. Making the two cases
+require the same flags means the dangerous one inherits the deliberateness of the safe one.
+
+Option 2 is worse than it looks. Container detection is a heuristic -- cgroup paths, `/.dockerenv`,
+namespace inodes -- and every heuristic has a false positive. A false positive here silently unlocks
+an all-interfaces bind on a host that is not isolated, which is precisely the failure this rule
+exists to prevent, and it would do it on the machines where detection is hardest to reason about.
+A security control that is exact except in the cases you cannot enumerate is not exact.
+
+Option 3 costs us something real and specific, stated plainly: **we are refusing a legitimate
+container networking configuration.** Bridge networking with an all-interfaces bind inside the
+namespace and a loopback-restricted publish on the host is a defensible design, it is what most of
+the ecosystem does, and under it the container's namespace genuinely does provide the isolation that
+the bind gives up. We refuse it anyway, because the failure mode is asymmetric and the evidence is
+right next door: OpenMed's REST documentation is careful throughout -- every uvicorn example is
+loopback, trusted-host checking is on, CORS is off unless origins are listed -- and their shipped
+`docker-compose.yml` publishes on all host interfaces regardless, with the docs telling you to
+change it. The container file is where this rule gets lost. A rule that holds everywhere except in
+containers does not hold, because containers are where deployments actually happen.
+
+**What a user must do instead.** Two supported shapes, both worked through in
+`docs/DEPLOY-SERVER.md`:
+
+- **Host networking** (`network_mode: host`, the default service in our compose file, Linux). The
+  container shares the host's namespace, so the loopback it binds IS the host's loopback. Same
+  reachability as `just deploy-local`, no token, nothing published. This is the answer for the large
+  majority of container deployments, which want "run it here, in a container" rather than "reach it
+  from elsewhere".
+- **Bridge networking with the container's own address** (the `bridge` profile). The entrypoint
+  resolves this container's address via `hostname -i` and passes it as `--host`, with `--expose` and
+  a token from a mounted Docker secret; the publish is `127.0.0.1:PORT:PORT`. Two independent gates
+  -- authentication at the process, loopback-only publishing at the host.
+
+**Consequences.**
+- The default image is USELESS under bridge networking with no further configuration, on purpose. It
+  fails closed with a connection refused rather than serving something nobody chose to publish. An
+  operator will hit this and be annoyed, and the annoyance is the design working.
+- The bridge path needs a shell in the runtime image for the entrypoint, which rules out a
+  distroless base and costs us the smaller attack surface. `debian:trixie-slim` plus `curl` for the
+  HEALTHCHECK is the trade; `curl` is the only package installed.
+- Orchestrators that inject a bind address (some Kubernetes patterns, some PaaS platforms) will hand
+  us an all-interfaces address and we will refuse to start. There is no workaround, by design. A
+  team on such a platform must front the service with a sidecar or accept that this product does not
+  run there.
+- We now maintain address canonicalisation ourselves. Getting a family or a mapping wrong is a bug
+  in the direction of refusing something valid -- the safe direction, and a support burden.
+- Rule 2 means exposure cannot be configured the way everything else is configured, which is
+  genuinely inconsistent configuration design. The asymmetry is the point, and it is the same
+  asymmetry D-035 accepted.
+- None of this makes the service safe to expose. It makes exposing it a decision someone made, named
+  an address for, and generated a credential for.

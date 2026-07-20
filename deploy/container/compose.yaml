@@ -1,0 +1,101 @@
+# Two ways to run the image, and neither of them is reachable from another host
+# by accident. Read docs/DEPLOY-SERVER.md before changing anything in this file.
+#
+#   docker compose -f deploy/container/compose.yaml up            # the default
+#   docker compose -f deploy/container/compose.yaml --profile bridge up
+#
+# THE COMMENT THIS FILE EXISTS FOR: the incumbent's documented default publishes
+# the port on ALL HOST INTERFACES -- `ports: ["8787:8787"]`, with no address on
+# the host side. Their prose is careful (every uvicorn example is loopback,
+# trusted-host checking is on), and their shipped compose file is not, and the
+# operator gets the compose file. That is the specific bug this project does not
+# ship. Every publish below names 127.0.0.1 on the host side. If you find yourself
+# deleting that prefix, what you are actually doing is putting an endpoint that
+# accepts clinical text and holds span maps onto the ward network, and you should
+# be doing it with `just deploy-check` output in front of you and a TLS terminator
+# already in place.
+
+services:
+  # ---------------------------------------------------------------------------
+  # THE DEFAULT. Host networking, loopback bind, no token, nothing published.
+  #
+  # With `network_mode: host` the container shares the host's network namespace,
+  # so the loopback the process binds IS the host's loopback: identical
+  # reachability to `just deploy-local`, and there is no port to publish because
+  # there is no namespace boundary to publish across.
+  #
+  # Linux only. On Docker Desktop (macOS, Windows) host networking behaves
+  # differently and you want `just deploy-local` on the host instead of a
+  # container -- which is the better answer there anyway.
+  # ---------------------------------------------------------------------------
+  deid-serve:
+    image: deid-tr/deid-serve:local
+    build:
+      context: ../..
+      dockerfile: deploy/container/Dockerfile
+    network_mode: host
+    # Redundant with the image's USER, and stated anyway: a compose file that
+    # silently runs as root because someone edited the Dockerfile is a regression
+    # nobody would notice.
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      # PREVENTS a compromised process from gaining privileges through a setuid
+      # binary, the same thing NoNewPrivileges= does in the systemd unit.
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # THE BRIDGE PATH, behind a profile so it never starts by accident.
+  #
+  # Bridge networking puts the container in its own namespace, and Docker's
+  # published port forwards to the container's BRIDGE address rather than to its
+  # loopback -- so a process bound to the container's loopback is unreachable.
+  # This is precisely the situation in which every other project reaches for an
+  # all-interfaces bind inside the container, and it is the trade recorded in
+  # docs/DECISIONS.md D-040: we refuse that, so the entrypoint names the
+  # container's OWN address instead, which requires --expose and a bearer token.
+  #
+  # The result is two independent gates: the process authenticates every request,
+  # and the host only publishes on its loopback, so nothing off this machine can
+  # reach the port even if the token leaks.
+  # ---------------------------------------------------------------------------
+  deid-serve-bridge:
+    profiles: ["bridge"]
+    image: deid-tr/deid-serve:local
+    build:
+      context: ../..
+      dockerfile: deploy/container/Dockerfile
+    command: ["/usr/local/bin/deid-entrypoint", "bridge"]
+    ports:
+      # 127.0.0.1 ON THE HOST SIDE, never a bare "8787:8787". This is the line
+      # the header comment is about.
+      - "127.0.0.1:8787:8787"
+    secrets:
+      - deid_bearer
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+secrets:
+  # A root-owned 0400 file on the host, mounted at /run/secrets/deid_bearer.
+  # NOT an environment variable and NOT an .env file: an environment value is
+  # visible in `docker inspect` and in /proc/PID/environ, and an .env file next to
+  # a compose file is the single most committed secret in open source.
+  #
+  #   install -d -m 0700 ./secrets
+  #   openssl rand -hex 32 > ./secrets/deid_bearer && chmod 0400 ./secrets/deid_bearer
+  #
+  # ./secrets/ is git-ignored. Verify that before you create it.
+  deid_bearer:
+    file: ../../secrets/deid_bearer

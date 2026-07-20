@@ -55,6 +55,7 @@ pub mod bind;
 pub mod catalog;
 pub mod http;
 pub mod log;
+pub mod preflight;
 pub mod server;
 pub mod session;
 

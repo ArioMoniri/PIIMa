@@ -8,9 +8,12 @@
 //! deid mask --format text|json|csv|html          output shape (default text)
 //! deid mask --confidence-threshold F             filter the REPORT, never the masking
 //! deid mask --placeholder-labels                 opt OUT of L5 surrogates
+//! deid mask --model FILE.gguf --runtime BIN      the LOCAL model L3 needs
 //! deid mask --no-medical-allowlist               opt OUT of the class C vocabulary
 //! deid mask-file IN --out OUT                   de-identify a PDF/DOCX/CSV/JSON file
 //! deid mask-file --input-format auto|pdf|...     override format detection (default auto)
+//! deid mask-file --allow-images                  process a page carrying unreadable images anyway
+//! deid doctor                                    what this machine can and cannot do
 //! deid update [--check]                          check for a new release
 //! deid pull [--from DIR]                         fetch model weights (M3)
 //! deid version                                   print the version
@@ -49,9 +52,11 @@
 
 mod batch;
 mod config;
+mod doctor;
 #[cfg(test)]
 mod fixtures;
 mod format;
+mod l3;
 mod mask;
 mod maskfile;
 mod notice;
@@ -65,6 +70,7 @@ use std::time::SystemTime;
 
 use config::{CliFlags, Config, EnvView};
 use deid_tr_core::Tier;
+use l3::{L3Config, L3Flags};
 
 /// The running version, from the workspace manifest.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -92,6 +98,9 @@ enum Command {
         tier: Tier,
         opts: mask::Opts,
         input_format: Option<deid_tr_files::Format>,
+        /// Continue when a page carries images deid-tr cannot read, instead of
+        /// refusing. The images are reported either way.
+        allow_images: bool,
     },
     /// A flag carried a value this binary cannot parse. Named separately from
     /// `Usage` because falling back to a default here would silently change what
@@ -100,6 +109,10 @@ enum Command {
     BadValue {
         flag: &'static str,
     },
+    /// `doctor`: report which layers can actually run here, and how to fix the
+    /// ones that cannot. Deliberately not a `mask` flag -- an operator asking
+    /// why the deep tier is unavailable has no document in play.
+    Doctor,
     Update,
     Pull {
         from: Option<String>,
@@ -117,7 +130,7 @@ struct BatchTargets {
     recursive: bool,
 }
 
-fn parse_args(args: &[String]) -> (CliFlags, Command) {
+fn parse_args(args: &[String]) -> (CliFlags, L3Flags, Command) {
     let mut flags = CliFlags::default();
     let mut rest = Vec::new();
     for arg in args {
@@ -129,7 +142,7 @@ fn parse_args(args: &[String]) -> (CliFlags, Command) {
     }
 
     let Some(verb) = rest.first().map(String::as_str) else {
-        return (flags, Command::Usage { unknown: false });
+        return (flags, L3Flags::default(), Command::Usage { unknown: false });
     };
     let tail = &rest[1..];
     let value_of = |name: &str| {
@@ -137,6 +150,15 @@ fn parse_args(args: &[String]) -> (CliFlags, Command) {
             .position(|a| a == name)
             .and_then(|i| tail.get(i + 1))
             .cloned()
+    };
+
+    // Read for EVERY verb, not just `mask`. `doctor` needs them to report what
+    // this invocation would actually use, and reporting a different resolution
+    // than the one `mask` would perform is how a diagnostic command starts
+    // lying.
+    let l3_flags = L3Flags {
+        model: value_of("--model"),
+        runtime: value_of("--runtime"),
     };
 
     let command = match verb {
@@ -155,6 +177,8 @@ fn parse_args(args: &[String]) -> (CliFlags, Command) {
                 "--confidence-threshold",
                 "--batch",
                 "--out",
+                "--model",
+                "--runtime",
             ];
             let taken: Vec<String> = valued.iter().filter_map(|name| value_of(name)).collect();
             let path = tail
@@ -171,7 +195,7 @@ fn parse_args(args: &[String]) -> (CliFlags, Command) {
             let format = match value_of("--format") {
                 Some(value) => match format::Format::parse(&value) {
                     Some(format) => format,
-                    None => return (flags, Command::BadValue { flag: "--format" }),
+                    None => return (flags, l3_flags, Command::BadValue { flag: "--format" }),
                 },
                 None => format::Format::default(),
             };
@@ -181,6 +205,7 @@ fn parse_args(args: &[String]) -> (CliFlags, Command) {
                     _ => {
                         return (
                             flags,
+                            l3_flags,
                             Command::BadValue {
                                 flag: "--confidence-threshold",
                             },
@@ -210,7 +235,7 @@ fn parse_args(args: &[String]) -> (CliFlags, Command) {
             };
             // Same rule as `mask`: every flag that takes a value is listed
             // once, so a value can never be mistaken for the positional input.
-            let valued = ["--tier", "--out", "--input-format"];
+            let valued = ["--tier", "--out", "--input-format", "--model", "--runtime"];
             let taken: Vec<String> = valued.iter().filter_map(|name| value_of(name)).collect();
             let input = tail
                 .iter()
@@ -222,6 +247,7 @@ fn parse_args(args: &[String]) -> (CliFlags, Command) {
                     Err(_) => {
                         return (
                             flags,
+                            l3_flags,
                             Command::BadValue {
                                 flag: "--input-format",
                             },
@@ -238,6 +264,7 @@ fn parse_args(args: &[String]) -> (CliFlags, Command) {
                         no_medical_allowlist: tail.iter().any(|a| a == "--no-medical-allowlist"),
                     },
                     input_format,
+                    allow_images: tail.iter().any(|a| a == "--allow-images"),
                 },
                 // No positional input: `mask-file` cannot read stdin, because
                 // format detection uses the file name as a tie-breaker between
@@ -245,6 +272,7 @@ fn parse_args(args: &[String]) -> (CliFlags, Command) {
                 None => Command::BadValue { flag: "IN" },
             }
         }
+        "doctor" => Command::Doctor,
         "update" => Command::Update,
         "pull" => Command::Pull {
             from: value_of("--from"),
@@ -253,13 +281,21 @@ fn parse_args(args: &[String]) -> (CliFlags, Command) {
         "help" | "--help" | "-h" => Command::Usage { unknown: false },
         _ => Command::Usage { unknown: true },
     };
-    (flags, command)
+    (flags, l3_flags, command)
 }
 
-fn load_config(flags: &CliFlags) -> Config {
+/// Resolve both configurations from one read of the environment and the file.
+///
+/// One read, because two would let the updater and L3 disagree about what the
+/// machine says -- and `deid doctor` exists to report exactly what `deid mask`
+/// would use.
+fn load_config(flags: &CliFlags, l3_flags: &L3Flags) -> (Config, L3Config) {
     let env = EnvView::from_process();
     let file = config::load_file(&env).unwrap_or_default();
-    config::resolve(flags, &env, &file)
+    (
+        config::resolve(flags, &env, &file),
+        l3::resolve(l3_flags, &env, &file),
+    )
 }
 
 /// Start a check on a detached thread and return immediately.
@@ -337,6 +373,7 @@ fn run_batch(
     targets: &BatchTargets,
     tier: Tier,
     opts: mask::Opts,
+    l3: &L3Config,
     format: format::Format,
     threshold: Option<f32>,
     stderr: &mut dyn Write,
@@ -359,6 +396,7 @@ fn run_batch(
         std::path::Path::new(output),
         tier,
         options,
+        l3,
         stderr,
     ) {
         Ok(summary) => summary,
@@ -395,8 +433,8 @@ fn run_batch(
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (flags, command) = parse_args(&args);
-    let config = load_config(&flags);
+    let (flags, l3_flags, command) = parse_args(&args);
+    let (config, l3) = load_config(&flags, &l3_flags);
 
     let mut stderr = std::io::stderr();
     // Before anything else, including before any check is spawned: nobody
@@ -429,7 +467,7 @@ fn main() -> ExitCode {
             format,
             threshold,
             batch: Some(targets),
-        } => run_batch(&targets, tier, opts, format, threshold, &mut stderr),
+        } => run_batch(&targets, tier, opts, &l3, format, threshold, &mut stderr),
         Command::Mask {
             path,
             tier,
@@ -441,8 +479,11 @@ fn main() -> ExitCode {
             let mut stdout = std::io::stdout();
             match mask::run(
                 path.as_deref(),
-                tier,
-                opts,
+                &mask::Build {
+                    tier,
+                    opts,
+                    l3: &l3,
+                },
                 format,
                 threshold,
                 &mut stdout,
@@ -463,6 +504,7 @@ fn main() -> ExitCode {
             tier,
             opts,
             input_format,
+            allow_images,
         } => {
             let destination = match out.as_deref() {
                 Some("-") => maskfile::Destination::Stdout,
@@ -479,9 +521,13 @@ fn main() -> ExitCode {
             match maskfile::run(
                 std::path::Path::new(&input),
                 &destination,
-                tier,
-                opts,
+                &mask::Build {
+                    tier,
+                    opts,
+                    l3: &l3,
+                },
                 input_format,
+                allow_images,
                 &mut stdout,
                 &mut stderr,
             ) {
@@ -498,6 +544,13 @@ fn main() -> ExitCode {
                 "deid: {flag} needs a value this binary can parse; nothing was masked."
             );
             ExitCode::FAILURE
+        }
+        Command::Doctor => {
+            // stdout, not stderr: this is the command's OUTPUT, and an operator
+            // sending it to a colleague should be able to pipe it.
+            let mut stdout = std::io::stdout();
+            let _ = doctor::report(&l3, &mut stdout);
+            ExitCode::SUCCESS
         }
         Command::Update => {
             // Explicit invocation: synchronous, and it clears any air-gap
@@ -546,9 +599,13 @@ fn main() -> ExitCode {
                         [--recursive]                       with --batch, descend into subdirectories\n\
                         [--placeholder-labels]              write [LABEL] instead of a surrogate; every patient in the note collapses onto one token\n\
                         [--no-medical-allowlist]            run L4 with no medical vocabulary; carcinoma, costa and Adalat will be masked\n\
+                        [--model FILE.gguf]                 LOCAL weights for the L3 sweep; required by --tier expert\n\
+                        [--runtime BIN]                     LOCAL inference executable for the L3 sweep; required by --tier expert\n\
                    mask-file IN --out OUT                   de-identify a PDF, DOCX, CSV, JSON or JSONL file\n\
                         [--input-format auto|txt|csv|json|jsonl|docx|pdf]  default auto: content first, name second\n\
                         [--out -]                           write the redacted bytes to stdout instead of a file\n\
+                        [--allow-images]                    process a PDF page that carries images anyway; without this such a page is REFUSED, and with it the images are still reported by page and pixel size\n\
+                   doctor                                   report which layers can run here, and how to fix the ones that cannot\n\
                    update                                   check for a new release\n\
                    pull [--from DIR]                        fetch model weights (not implemented)\n\
                    version                                  print the version\n\
@@ -556,6 +613,14 @@ fn main() -> ExitCode {
                  COVERAGE: rule-detectable identifiers only. L2 has no trained model in this\n\
                  build, so deid masks NO NAMES. TCKN, VKN, SGK, IBAN, phone, MRN, email and\n\
                  dates are masked; PATIENT_NAME, CLINICIAN_NAME and RELATIVE_NAME are not.\n\
+                 --tier expert does not change that: it adds the L3 quasi-identifier sweep,\n\
+                 which still masks no names. Run `deid doctor` for this machine's answer.\n\
+                 \n\
+                 --tier expert needs a LOCAL model you supply: --model FILE.gguf and\n\
+                 --runtime BIN, or DEID_L3_MODEL / DEID_L3_RUNTIME, or l3_model / l3_runtime\n\
+                 in your config file (flag > env > config file). No weights ship with this\n\
+                 repository and nothing is downloaded at inference time. If L3 cannot be\n\
+                 wired, the run FAILS -- it never falls back to Safe Harbor.\n\
                  \n\
                  A --batch run never skips a file: every entry gets a manifest record, every\n\
                  failure is recorded, the run continues, and the exit code is non-zero if any\n\
@@ -588,7 +653,7 @@ mod tests {
             vec!["mask", "--offline", "note.txt"],
             vec!["mask", "note.txt", "--offline"],
         ] {
-            let (flags, command) = parse_args(&args(&raw));
+            let (flags, _, command) = parse_args(&args(&raw));
             assert!(flags.offline, "{raw:?}");
             assert!(matches!(command, Command::Mask { .. }));
         }
@@ -596,7 +661,7 @@ mod tests {
 
     #[test]
     fn mask_parses_its_file_and_tier() {
-        let (_, command) = parse_args(&args(&["mask", "note.txt", "--tier", "expert"]));
+        let (_, _, command) = parse_args(&args(&["mask", "note.txt", "--tier", "expert"]));
         match command {
             Command::Mask {
                 path, tier, opts, ..
@@ -613,7 +678,7 @@ mod tests {
 
     #[test]
     fn mask_defaults_to_safe_harbor_and_to_stdin() {
-        let (_, command) = parse_args(&args(&["mask"]));
+        let (_, _, command) = parse_args(&args(&["mask"]));
         match command {
             Command::Mask { path, tier, .. } => {
                 assert_eq!(path, None);
@@ -629,7 +694,7 @@ mod tests {
 
     #[test]
     fn the_degraded_configurations_are_opt_outs_and_are_parsed_as_such() {
-        let (_, command) = parse_args(&args(&[
+        let (_, _, command) = parse_args(&args(&[
             "mask",
             "note.txt",
             "--placeholder-labels",
@@ -646,7 +711,7 @@ mod tests {
 
     #[test]
     fn the_tier_value_is_not_mistaken_for_the_input_file() {
-        let (_, command) = parse_args(&args(&["mask", "--tier", "expert"]));
+        let (_, _, command) = parse_args(&args(&["mask", "--tier", "expert"]));
         match command {
             Command::Mask { path, .. } => assert_eq!(path, None),
             _ => panic!("expected mask"),
@@ -655,17 +720,17 @@ mod tests {
 
     #[test]
     fn every_documented_verb_parses() {
-        assert!(matches!(parse_args(&args(&["update"])).1, Command::Update));
+        assert!(matches!(parse_args(&args(&["update"])).2, Command::Update));
         assert!(matches!(
-            parse_args(&args(&["pull", "--from", "./bundle"])).1,
+            parse_args(&args(&["pull", "--from", "./bundle"])).2,
             Command::Pull { from: Some(_) }
         ));
         assert!(matches!(
-            parse_args(&args(&["version"])).1,
+            parse_args(&args(&["version"])).2,
             Command::Version
         ));
         assert!(matches!(
-            parse_args(&args(&["frobnicate"])).1,
+            parse_args(&args(&["frobnicate"])).2,
             Command::Usage { unknown: true }
         ));
     }

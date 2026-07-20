@@ -1,0 +1,153 @@
+# deid-serve as a system service, bound to loopback, running as nobody in particular.
+#
+# Install:
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin deid
+#   sudo install -m 0755 target/release/deid-serve /usr/local/bin/deid-serve
+#   sudo install -m 0644 deploy/systemd/deid-serve.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now deid-serve
+#
+# Read docs/DEPLOY-SERVER.md before changing ExecStart. The threat model of a service that
+# accepts clinical text over a socket is not the threat model of a CLI, and the
+# difference is the whole document.
+
+[Unit]
+Description=deid-tr local de-identification service (loopback only)
+Documentation=file:///usr/share/doc/deid-tr/DEPLOY-SERVER.md
+# No After=network-online.target on purpose. This unit binds loopback, which exists
+# before any interface is configured, and waiting for the network would imply this
+# service has something to do with it.
+After=local-fs.target
+
+[Service]
+Type=exec
+
+# A DEDICATED UNPRIVILEGED USER, not root and not a human's account.
+#
+# PREVENTS: a memory-safety or parsing bug in the HTTP subset from executing with
+# authority over the machine. This process holds session span maps -- the table
+# from each surrogate back to the real identifier it replaced -- so the blast
+# radius of compromising it is already the worst thing in the product. It must not
+# also be the authority to read every other patient file on the host.
+User=deid
+Group=deid
+DynamicUser=no
+
+# THE DEFAULT INVOCATION. Loopback, no --expose, no token needed.
+#
+# There is no Environment= and no EnvironmentFile= in this unit. An environment
+# file holding a bearer token is world-readable more often than anyone intends,
+# and even at 0600 the value is visible in /proc/PID/environ and in the output of
+# `systemctl show`, which any user may run.
+ExecStart=/usr/local/bin/deid-serve --port 8787
+
+# ---------------------------------------------------------------------------
+# Supplying a bearer token, if you have decided to need one.
+#
+# systemd credentials are the mechanism. The file is decrypted (or copied) into a
+# private per-unit directory that only this unit's processes can read, it is never
+# in the environment, never in argv, and never in `systemctl show`:
+#
+#   sudo install -d -m 0700 /etc/deid-tr
+#   openssl rand -hex 32 | sudo tee /etc/deid-tr/bearer >/dev/null
+#   sudo chmod 0400 /etc/deid-tr/bearer && sudo chown root:root /etc/deid-tr/bearer
+#
+# then replace ExecStart above with the two lines below:
+#
+#   LoadCredential=bearer:/etc/deid-tr/bearer
+#   ExecStart=/usr/local/bin/deid-serve --port 8787 --token-file %d/bearer
+#
+# The source file stays root-owned and 0400: the service user never reads it, only
+# systemd does, and it hands the process a copy. If your systemd predates
+# LoadCredential (v247), the fallback is a root-owned 0400 file plus
+# SupplementaryGroups= so the service user can read that ONE file -- still a file,
+# still not an environment variable.
+#
+# Do NOT use --token: an argument is visible in `ps` to every user on the host.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Hardening. Each directive is here because of something it prevents IN THIS
+# PRODUCT, not because it appeared in a checklist.
+# ---------------------------------------------------------------------------
+
+# PREVENTS: a compromised deid-serve from gaining privilege it did not start with
+# -- a setuid helper it manages to exec cannot raise it back towards root. There
+# is no legitimate escalation in a process whose entire job is to run regexes over
+# a string it was handed.
+NoNewPrivileges=yes
+
+# PREVENTS: span maps and document text reaching /tmp where another user can read
+# them. The service writes no temporary files today; the directive is what keeps
+# that true for a future contributor who reaches for a temp file to debug a
+# masking bug and leaves a clinical note in /tmp on a hospital workstation.
+PrivateTmp=yes
+
+# PREVENTS: any write to the operating system. Nothing about de-identification
+# needs to modify /usr, /boot or /etc, so a bug that can be steered into a write
+# has nowhere to land. strict rather than full because the difference is /etc,
+# and /etc is where the bearer credential lives.
+ProtectSystem=strict
+
+# PREVENTS: reading /home, /root and /run/user. This matters specifically here:
+# the clinical exports a clinician is de-identifying are in their home directory,
+# and a service that can be talked into reading a path could otherwise read the
+# ORIGINAL notes rather than only the one it was POSTed. The service takes
+# documents in request bodies and needs no filesystem access to a note, ever.
+ProtectHome=yes
+
+# PREVENTS: access to physical devices -- disks by device node, and anything
+# attached to the workstation. It also closes the reach-around to raw block
+# devices that would sidestep ProtectHome and ProtectSystem entirely.
+PrivateDevices=yes
+
+# PREVENTS: any socket that is not IPv4/IPv6 TCP. In particular no AF_NETLINK
+# (no reading the host's interface and routing tables, which is reconnaissance
+# for finding an interface worth exposing on) and no AF_UNIX to another daemon's
+# socket. deid-serve accepts TCP connections and makes none; it needs nothing
+# else. AF_UNIX is included only because journald's stderr forwarding uses it.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# PREVENTS: mapping a page both writable and executable, which is the mechanism
+# behind turning a memory-corruption bug into arbitrary code execution. Safe here
+# because deid-serve is ahead-of-time compiled Rust with no JIT and no interpreter.
+#
+# COMPATIBILITY: this is the one directive that may need removing. If a future
+# build links an ONNX runtime for L2, or a local LLM runtime for L3, those
+# generate code at run time and will fail to start under this. Removing it then is
+# correct and should be noted in the unit; keeping it now is free.
+MemoryDenyWriteExecute=yes
+
+# The rest of the standard set, same standard: each one names something this
+# process has no business doing.
+# PREVENTS: loading a kernel module, and altering the kernel's tunables and clock.
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+# PREVENTS: seeing or signalling other users' processes in /proc -- including
+# reading another deid-serve's memory or its argv.
+ProtectProc=invisible
+ProcSubset=pid
+PrivateUsers=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete
+
+# UMask so that if a future version ever does write a file, it is not group- or
+# world-readable by default.
+UMask=0077
+
+# Restart, but not into a loop. A refused bind (exit 3) is a decision the operator
+# has to change, not a transient fault, and restarting on it would bury the
+# refusal in the journal under a hundred identical lines.
+Restart=on-failure
+RestartPreventExitStatus=3
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

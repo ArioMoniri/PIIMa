@@ -208,8 +208,17 @@ of these is a span a token classifier can be trained to tag, because the re-iden
 a *meaning*, not a name. OpenMed's 54-label space has `OCCUPATION`, `JOBTITLE` and `ORGANIZATION`,
 which are token-level entities; it has no class corresponding to re-identification-risk reasoning
 over a whole document. Our L3 is a local LLM performing exactly that, gated behind the Expert
-Determination tier and validated by a red team rather than by F1 (D-008). **It is designed, its
-schema classes exist, and it currently detects nothing: contextual coverage is 0.0000.**
+Determination tier and validated by a red team rather than by F1 (D-008). **The path is built and
+tested end to end, and it is reachable from the shipped CLI: `deid mask --tier expert --model
+FILE.gguf --runtime BIN`, or the `DEID_L3_MODEL` / `DEID_L3_RUNTIME` environment variables, or
+`l3_model` / `l3_runtime` in the config file, in that precedence order. What it does NOT come with
+is a model: no weights ship with this repository, nothing is downloaded at inference time (I1), and
+the operator supplies both the quantized GGUF file and the local inference runtime. So the honest
+status is "built, reachable, and unmeasured": contextual coverage against our own corpus is still
+0.0000 because no model has been selected and evaluated, not because the layer does not run.**
+`deid doctor` reports which of the two paths this machine is missing and the exact command to fix
+each. When L3 cannot be wired the run fails loudly; it never degrades to Safe Harbor behind the
+operator's back.
 
 For completeness, three places where a design difference is real but modest: byte offsets validated
 onto UTF-8 character boundaries at construction rather than character positions (which diverge in
@@ -246,7 +255,7 @@ gateway (`bindings/mcp`). Designed, specified and tested-in-isolation are all `n
 | Multi-detector agreement as a first-class signal | not documented in their API or docs | by-design-different — `support` counts distinct detector ids; used only to *forbid* demotion |
 | Checksum-valid span protected from demotion | no — not a first-class concept | yes (`checksum_validated`, undemotable) |
 | Presidio-style context scoring (`base_score`/`context_words`/`context_boost`) | yes, 100-char window | no |
-| Contextual quasi-identifier detection (narrative re-ID) | no capability | **no — designed (L3), unbuilt, coverage 0.0000** |
+| Contextual quasi-identifier detection (narrative re-ID) | no capability | **built and reachable, unmeasured — coverage 0.0000.** The whole L3 path ships and is tested against a mock runtime: prompt, local invocation over stdin, JSON parse, verbatim re-anchoring, union. `deid mask --tier expert --model FILE.gguf --runtime BIN` runs it. **No weights ship with this repository** and none are downloaded, so what a given machine detects depends on a model the operator supplies; measured coverage against our own corpus is still 0.0000 because no model has been selected and evaluated. If L3 cannot be wired the run FAILS — it never falls back to Safe Harbor |
 | Cloud LLM in the detection path | yes, `POST /privacy-gateway/complete`, operator-configured, fails closed | by-design-different — forbidden by I1; L3 must be a local model |
 | Offsets | character positions | by-design-different — byte offsets, char-boundary-validated at construction |
 
@@ -281,7 +290,7 @@ gateway (`bindings/mcp`). Designed, specified and tested-in-isolation are all `n
 | Batch and dataset redaction (CSV/JSONL/Parquet) | yes | partial — `deid mask --batch DIR --out DIR` de-identifies a directory through the shipped CLI, writing a `manifest.jsonl` record for every entry and exiting non-zero if any item failed. It treats each file as UTF-8 **text**: it does not parse CSV or JSONL structure, does not classify PHI columns, and has no Parquet path |
 | OCR (Tesseract, PaddleOCR, EasyOCR, docTR) | yes | no |
 | DOCX / EPUB / Markdown / AsciiDoc | yes | no — DOCX is implemented in the `deid-tr-files` library, which **no shipped binary links**, so by this table's own rule it is not a capability yet. No EPUB, Markdown or AsciiDoc handler exists |
-| PDF redaction with text-layer leakage verification | yes | no — implemented in the `deid-tr-files` library (content-stream removal, full rewrite, re-open-and-verify, refusal on scanned pages, per D-033) and **reachable from no shipped binary**. Nobody can run it, so it does not count |
+| PDF redaction with text-layer leakage verification | yes | partial — `deid mask-file IN --out OUT` reaches the `deid-tr-files` implementation (content-stream removal, full rewrite, re-open-and-verify, refusal on scanned pages, per D-033), and the browser panel runs the same code. **It redacts TEXT and never touches pixels.** A page carrying images is therefore REFUSED by default and named by page number, image count and pixel dimensions (D-039); `--allow-images` continues and prints the same list beside the result. Nothing here reads a QR code, a barcode, a signature or a stamp, and no output is called clean over pixels that were not read. It also masks **no names** in a PDF, for the same reason it masks none anywhere |
 | DICOM header + burned-in pixel redaction | yes | no |
 | FHIR R4 / SMART-on-FHIR / HL7 v2 / CDA / OMOP | yes | no |
 | Chat-log and vCard/iCalendar redaction | yes | no |
@@ -370,7 +379,10 @@ Specifically:
   remove them. This is not a close call.
 - Any language other than Turkish.
 - Any workflow involving PDFs, DOCX, scanned documents, DICOM, FHIR, HL7, CSV/Parquet datasets, or
-  chat logs.
+  chat logs. deid-tr does now redact a PDF's text and verify it, but it reads TEXT ONLY: a page
+  carrying an image is refused by default, and with `--allow-images` the images travel into the
+  output unread and are listed by page and pixel size beside the result (D-039). Anything burned
+  into a scan, a stamp, a signature or a QR code is untouched, and so is every name.
 - Any deployment needing iOS, Android, browser, MLX, gRPC or SageMaker. (deid-tr does now ship a
   loopback-only REST service, `deid-serve`; it detects exactly what the CLI detects, which is no
   names, so it does not change this recommendation.)

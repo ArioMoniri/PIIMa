@@ -53,6 +53,29 @@ export function family(label) {
   return "other";
 }
 
+/// The two-letter sigil printed on a mark and beside a span map label.
+///
+/// COLOUR IS NOT ALLOWED TO BE THE ONLY CHANNEL. About one man in twelve has
+/// some colour vision deficiency, and a masking tool whose family coding is
+/// hue-only fails them silently -- they see marks, cannot tell an identifier
+/// number from a date, and have no way to know they are missing anything. So
+/// each family is carried three times over: this sigil, a distinct underline
+/// treatment in the stylesheet, and the hue. Any one of the three alone is
+/// enough to separate the families, and the exact label is always in the span
+/// map besides.
+const SIGILS = {
+  id: "ID",
+  contact: "CT",
+  date: "DT",
+  place: "PL",
+  name: "NM",
+  other: "OT",
+};
+
+export function sigil(familyName) {
+  return SIGILS[familyName] ?? SIGILS.other;
+}
+
 /// The six methods, in the order the selector offers them.
 export const METHODS = [
   ["surrogate", "surrogate (L5, real)"],

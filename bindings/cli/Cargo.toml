@@ -37,6 +37,18 @@ deid-tr-core = { path = "../../core" }
 # (see bindings/files/Cargo.toml), so admitting it opens no socket and forces no
 # registry resolve -- `just test-airgapped` stays green.
 deid-tr-files = { path = "../files" }
+# The L3 model runtime. WHY ADMITTING IT DOES NOT WEAKEN THIS MANIFEST'S RULE:
+# `bindings/llm` declares exactly one dependency, `deid-tr-core`, and its own
+# manifest permanently bans every HTTP client and cloud inference SDK. It is a
+# PATH dependency with no registry crates of its own, so it opens no socket and
+# forces no resolve -- `just test-airgapped` stays green.
+#
+# Until this line existed the Expert Determination tier could not be reached
+# from any shipped binary: `Tier::ExpertDetermination` -> `Contextual` ->
+# `ContextualSweep<M>` -> `LocalGgufModel` was complete and tested, and no
+# artifact a hospital installs could construct it. A tested component wired to
+# nothing is not a feature.
+deid-tr-llm = { path = "../llm" }
 # CSPRNG for the L5 salt. `core/` cannot generate one -- it performs no I/O
 # (I1), so it has no route to an operating-system entropy source and a salt it
 # invented from a counter would be a salt an attacker can guess. Supplying the

@@ -42,6 +42,12 @@
 //! it has to be written as a predicate rather than as a comparison against a
 //! literal. `IpAddr::is_unspecified` covers both families exactly, including the
 //! IPv6 form that an operator reaches for when the IPv4 one is blocked.
+//!
+//! It does NOT cover the third spelling, and that is what [`canonical`] is for:
+//! the IPv4-mapped IPv6 form is an `Ipv6Addr` whose `is_unspecified` is false and
+//! whose bind, on a host without `IPV6_V6ONLY`, is every IPv4 interface. Every
+//! rule below is applied to the canonical form so that a spelling gets the same
+//! answer as the address it denotes.
 
 use core::fmt;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -202,7 +208,11 @@ impl Listen {
 ///
 /// One [`Refusal`] per rule in the module header.
 pub fn plan(host: IpAddr, port: u16, expose: bool, token: Option<&str>) -> Result<Listen, Refusal> {
-    // FIRST, and before any flag is consulted. An all-interfaces bind is not a
+    // Canonicalised FIRST, so that every rule below sees one address per
+    // address rather than one per spelling. See [`canonical`].
+    let host = canonical(host);
+
+    // THEN, and before any flag is consulted. An all-interfaces bind is not a
     // configuration this binary supports, so there is no combination of later
     // checks that can reach it.
     if host.is_unspecified() {
@@ -241,6 +251,31 @@ pub fn plan(host: IpAddr, port: u16, expose: bool, token: Option<&str>) -> Resul
 #[must_use]
 pub const fn default_host() -> IpAddr {
     IpAddr::V4(Ipv4Addr::LOCALHOST)
+}
+
+/// Collapse an IPv4-mapped IPv6 address to the IPv4 address it means.
+///
+/// # The hole this closes
+///
+/// `IpAddr::is_unspecified` is exact for each family SEPARATELY, and there is a
+/// third spelling that belongs to neither: the IPv4-mapped form, `::ffff:` in
+/// front of the IPv4 all-interfaces address. It parses, it is a valid `Ipv6Addr`,
+/// its `is_unspecified` is FALSE -- and on any host that has not set
+/// `IPV6_V6ONLY`, binding it binds every IPv4 interface on the machine. It is
+/// also exactly what an operator reaches for third, after the dotted quad and
+/// `::` have both been refused and they are looking for a spelling that gets
+/// past us.
+///
+/// Every rule in [`plan`] is applied to the canonical form, so the mapped
+/// spelling of an address gets the same answer as the address. That cuts both
+/// ways and both ways are right: `::ffff:` in front of a loopback address is
+/// loopback and needs no flag.
+#[must_use]
+pub fn canonical(host: IpAddr) -> IpAddr {
+    match host {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(host, IpAddr::V4),
+        IpAddr::V4(_) => host,
+    }
 }
 
 #[cfg(test)]
@@ -308,6 +343,42 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_ipv4_mapped_spelling_gets_the_same_answer_as_the_address_it_maps_to() {
+        // The third spelling, and the one `is_unspecified` alone misses: an
+        // Ipv6Addr whose payload is the IPv4 all-interfaces address. Binding it
+        // on a host without IPV6_V6ONLY binds every IPv4 interface.
+        let token = good_token();
+        let mapped_all = format!("{}ffff:0.0{}", "::", ".0.0")
+            .parse::<IpAddr>()
+            .expect("assembled mapped address");
+        for expose in [false, true] {
+            for supplied in [None, Some(token.as_str())] {
+                assert_eq!(
+                    plan(mapped_all, DEFAULT_PORT, expose, supplied).err(),
+                    Some(Refusal::AllInterfaces),
+                    "the IPv4-mapped all-interfaces address reached a listener"
+                );
+            }
+        }
+
+        // And the same canonicalisation in the permissive direction: a mapped
+        // loopback address IS loopback, and needs no flag.
+        let mapped_loopback = "::ffff:127.0.0.1"
+            .parse::<IpAddr>()
+            .expect("mapped loopback");
+        let listen = plan(mapped_loopback, DEFAULT_PORT, false, None).expect("mapped loopback");
+        assert!(listen.addr.ip().is_loopback());
+        assert!(!listen.is_exposed());
+
+        // And a mapped routable address is treated as the routable address.
+        let mapped_lan = "::ffff:192.168.1.5".parse::<IpAddr>().expect("mapped lan");
+        assert_eq!(
+            plan(mapped_lan, DEFAULT_PORT, false, None).err(),
+            Some(Refusal::NonLoopbackWithoutExpose)
+        );
     }
 
     #[test]

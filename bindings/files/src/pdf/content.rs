@@ -91,6 +91,26 @@ pub struct Extraction {
 }
 
 impl Extraction {
+    /// Append another extraction whose source ranges are relative to `base`.
+    ///
+    /// A page is read as a SEQUENCE of independently-scoped buffers -- its own
+    /// `/Contents`, then each Form XObject it invokes -- because each carries
+    /// its own `/Resources /Font` and therefore its own decoding tables. The
+    /// alternative, one buffer and one merged font table, decodes a form's
+    /// `/F1` with the page's `/F1` whenever both exist, which is a silent wrong
+    /// decode of exactly the kind this module refuses to make.
+    pub fn absorb(&mut self, other: Self, base: usize) {
+        self.undecodable += other.undecodable;
+        self.atoms.extend(other.atoms.into_iter().map(|atom| {
+            Atom {
+                text: atom.text,
+                source: atom
+                    .source
+                    .map(|range| (range.start + base)..(range.end + base)),
+            }
+        }));
+    }
+
     /// The page text the detection pipeline is run over.
     #[must_use]
     pub fn text(&self) -> String {

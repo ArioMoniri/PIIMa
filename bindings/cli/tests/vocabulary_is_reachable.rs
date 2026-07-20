@@ -18,8 +18,9 @@
 //! binary today, and not because of the allowlist: no layer in a released
 //! `deid` proposes a name span at all. L1 has no name rule (`rules/mod.rs`
 //! runs tckn, vkn, iban, sgk, phone, date, email and mrn), L2 ships with an
-//! empty ensemble because there are no weights yet, and L3 is tier-gated on a
-//! local model the CLI has no flag for. A surname is therefore never a
+//! empty ensemble because there are no weights yet, and L3 -- now reachable via
+//! `--model`/`--runtime`, see `tests/expert_tier_is_reachable.rs` -- proposes
+//! quasi-identifiers rather than names. A surname is therefore never a
 //! CANDIDATE, so no allowlist wiring could mask it. That is a separate,
 //! larger gap and it is reported as one; inventing a name detector here to make
 //! an assertion pass would be worse than naming the hole.

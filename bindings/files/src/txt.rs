@@ -242,7 +242,13 @@ const CP1254_HIGH_CONTROL: [char; 32] = [
     '\u{02dc}', '\u{2122}', '\u{0161}', '\u{203a}', '\u{0153}', '\u{fffd}', '\u{fffd}', '\u{0178}',
 ];
 
-fn cp1254_to_char(byte: u8) -> char {
+/// One Windows-1254 byte as a character.
+///
+/// `pub(crate)` because [`crate::pdf::font`] needs the SAME table: a PDF simple
+/// font with `/WinAnsiEncoding` carries the same single-byte code page, and two
+/// copies of a code page is how the two paths drift until only one of them
+/// decodes `ş`.
+pub(crate) fn cp1254_to_char(byte: u8) -> char {
     match byte {
         0x00..=0x7f => char::from(byte),
         0x80..=0x9f => CP1254_HIGH_CONTROL[usize::from(byte) - 0x80],

@@ -14,6 +14,35 @@
 //! identifier by searching a content stream for the UTF-8 of a name.** Any code
 //! that does is not redacting, it is guessing.
 //!
+//! # The single-byte fallback is Windows-1254, unconditionally
+//!
+//! A simple font with `/WinAnsiEncoding` or no `/Encoding` at all decodes one
+//! byte per glyph through a Latin code page. Which one is not recorded anywhere
+//! in the file, and the two candidates -- Windows-1252/Latin-1 and
+//! Windows-1254, the Turkish ANSI page -- are IDENTICAL except at six byte
+//! positions: `0xD0 0xDD 0xDE 0xF0 0xFD 0xFE`. Those six are exactly
+//! `Ğ İ Ş ğ ı ş` under 1254 and `Ð Ý Þ ð ý þ` under Latin-1.
+//!
+//! So the choice is not "which code page is this document" in general; it is
+//! only "what do those six bytes mean", and this crate answers Turkish every
+//! time. The alternative -- sniffing the document -- is circular here, because
+//! the evidence a sniffer would weigh is the decoded text it is trying to
+//! produce, and it would have to reach a verdict per font, per page, from a few
+//! bytes. A wrong verdict is silent: `Şükrü` decoded as `Þükrü` is a string the
+//! rules layer and any future model see as a different name, so it is a RECALL
+//! bug (I2), and I2 says recall wins the tie.
+//!
+//! `txt.rs` already made this exact trade for `.txt` input and owns the table;
+//! this module calls into it rather than carrying a second copy, because two
+//! copies of a code page drift until only one of them decodes `ş`.
+//!
+//! RESIDUAL RISK, stated plainly: a genuinely Icelandic or Faroese document
+//! (`Ð ð Þ þ Ý ý`) or any other producer relying on those six Latin-1
+//! positions is decoded wrongly at exactly those characters. That is accepted.
+//! Those letters carry no Turkish identifier information, the tool is scoped to
+//! Turkish clinical text, and the failure is symmetric with the one being fixed
+//! -- but only one direction of it loses Turkish names.
+//!
 //! # What is NOT claimed
 //!
 //! A font with no `/ToUnicode` and a non-standard `/Encoding` cannot be decoded
@@ -117,13 +146,21 @@ impl Font {
             return None;
         }
         // A simple font with no `/ToUnicode` and no `/Differences` is using a
-        // standard Latin encoding, where codes 32..=255 agree with Latin-1 over
-        // everything this pipeline can detect (digits, ASCII letters, `@`, `+`,
-        // `.`, `/`, `-`).
-        (0x20..=0xff)
-            .contains(&code)
-            .then(|| char::from_u32(code).map(|value| value.to_string()))
-            .flatten()
+        // standard single-byte Latin code page, and this crate decodes that page
+        // as WINDOWS-1254, not Latin-1 -- see the module header for why that is
+        // a decision rather than a detail.
+        if !(0x20..=0xff).contains(&code) {
+            return None;
+        }
+        let byte = u8::try_from(code).ok()?;
+        match crate::txt::cp1254_to_char(byte) {
+            // The handful of positions Windows-1254 leaves undefined. `\u{fffd}`
+            // is the table's way of saying "no character here"; emitting it
+            // would be a guess, and this module's rule is that an undecodable
+            // code becomes an UNREADABLE-page signal instead.
+            '\u{fffd}' => None,
+            value => Some(value.to_string()),
+        }
     }
 }
 
@@ -259,9 +296,16 @@ fn parse_differences(items: &[Object]) -> BTreeMap<u32, char> {
 ///
 /// Deliberately partial. A full Adobe Glyph List is ~4300 entries of data this
 /// crate would then have to keep current; what the detection layer needs is
-/// digits, ASCII letters and the punctuation that appears inside identifiers.
-/// Everything else returns `None`, which routes the page to the REFUSE path
-/// rather than to a wrong decode.
+/// digits, ASCII letters, the punctuation that appears inside identifiers, and
+/// the Turkish letters. Everything else returns `None`, which routes the page to
+/// the REFUSE path rather than to a wrong decode.
+///
+/// The Turkish block is not decoration. A name missing from this list does not
+/// fail loudly: `parse_differences` simply never records the code, `text` then
+/// reaches the single-byte fallback, and the glyph the font EXPLICITLY named
+/// comes out as whatever that code page says. A producer that writes
+/// `253 /dotlessi` has told this crate the character is `ı`, and dropping that
+/// statement on the floor to guess from the byte is the worst of both paths.
 fn glyph_name_to_char(name: &str) -> Option<char> {
     if let Some(hex) = name.strip_prefix("uni") {
         return u32::from_str_radix(hex, 16).ok().and_then(char::from_u32);
@@ -291,6 +335,26 @@ fn glyph_name_to_char(name: &str) -> Option<char> {
         ("seven", '7'),
         ("eight", '8'),
         ("nine", '9'),
+        // The six that carry Turkish, under their Adobe Glyph List names.
+        ("dotlessi", 'ı'),
+        ("Idotaccent", 'İ'),
+        ("scedilla", 'ş'),
+        ("Scedilla", 'Ş'),
+        ("gbreve", 'ğ'),
+        ("Gbreve", 'Ğ'),
+        // The other three Turkish letters, which Latin-1 does agree on but
+        // which still need a name here to survive a `/Differences` array.
+        ("ccedilla", 'ç'),
+        ("Ccedilla", 'Ç'),
+        ("odieresis", 'ö'),
+        ("Odieresis", 'Ö'),
+        ("udieresis", 'ü'),
+        ("Udieresis", 'Ü'),
+        // Turkish attaches case suffixes with an apostrophe (`Ayşe'nin`), so
+        // both apostrophe glyphs are punctuation INSIDE an identifier here, not
+        // between two.
+        ("quotesingle", '\''),
+        ("quoteright", '\u{2019}'),
     ];
     NAMED
         .iter()
@@ -303,11 +367,51 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_simple_font_falls_back_to_latin1() {
+    fn a_simple_font_falls_back_to_windows_1254_not_latin1() {
+        // Renamed from `a_simple_font_falls_back_to_latin1`, which asserted the
+        // bug. Latin-1 turns every `ş` in a Turkish report into `þ` before any
+        // detector runs, which makes an encoding choice a recall failure.
         let font = Font::default();
         assert_eq!(font.text(u32::from(b'A')).as_deref(), Some("A"));
         assert_eq!(font.text(u32::from(b'7')).as_deref(), Some("7"));
         assert_eq!(font.text(0x01), None, "a control code is not text");
+
+        // THE SIX, at the byte positions where the two code pages disagree.
+        for (code, expected) in [
+            (0xd0u32, "Ğ"),
+            (0xdd, "İ"),
+            (0xde, "Ş"),
+            (0xf0, "ğ"),
+            (0xfd, "ı"),
+            (0xfe, "ş"),
+        ] {
+            assert_eq!(font.text(code).as_deref(), Some(expected));
+        }
+        // Everywhere else the two pages agree, so nothing else moved.
+        assert_eq!(font.text(0xfc).as_deref(), Some("ü"));
+        assert_eq!(font.text(0xe7).as_deref(), Some("ç"));
+        // 0x81 has no character in Windows-1254; a guess here would be a page
+        // reported as read that was not.
+        assert_eq!(font.text(0x81), None);
+    }
+
+    #[test]
+    fn a_declared_turkish_glyph_name_beats_the_code_page() {
+        // The shape this document actually had: `/Differences [253 /dotlessi]`.
+        // Before, `dotlessi` was not in the table, the entry was dropped, and
+        // the fallback decoded byte 253 -- so a font that SAID `ı` yielded `ý`.
+        let items = vec![
+            Object::Int(253),
+            Object::Name("dotlessi".to_owned()),
+            Object::Int(222),
+            Object::Name("Scedilla".to_owned()),
+        ];
+        let font = Font {
+            differences: parse_differences(&items),
+            ..Font::default()
+        };
+        assert_eq!(font.text(253).as_deref(), Some("ı"));
+        assert_eq!(font.text(222).as_deref(), Some("Ş"));
     }
 
     #[test]

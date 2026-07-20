@@ -8,11 +8,18 @@
 :root {
   color-scheme: light dark;
 
+  /* A fifth-based type scale (ratio 1.2 either side of the 15px body step) plus
+     a 4px spacing grid every value below is a multiple of. Both are here rather
+     than in the rules so that a size or a gap is always chosen FROM the scale:
+     the panel read as stacked slabs because every card set its own padding and
+     nothing lined up vertically between them. */
+  --step--2: 0.75rem;
   --step--1: 0.8125rem;
   --step-0: 0.9375rem;
   --step-1: 1.0625rem;
-  --step-2: 1.375rem;
-  --step-3: 1.75rem;
+  --step-2: 1.3125rem;
+  --step-3: 1.625rem;
+  --step-4: 2rem;
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -20,20 +27,41 @@
   --space-4: 1rem;
   --space-5: 1.5rem;
   --space-6: 2.25rem;
+  --space-7: 3rem;
 
-  --radius: 8px;
-  --radius-sm: 5px;
+  /* THREE RADII, EACH WITH A RULE, AND NOTHING PICKS A FOURTH.
+     The panel had five values in circulation (8, 5, 3, 2 and 999) with no
+     principle deciding between them, which is why a button and the card
+     holding it never looked like they came from the same drawing. The rule is
+     by ROLE, not by size:
+
+       --radius-control  anything you click, type into or focus
+       --radius-surface  anything that groups other things
+       --radius-pill     only genuinely capsule-shaped things: status pills and
+                         progress rails, where the shape IS the meaning
+
+     A new value belongs to one of these three or it does not belong. */
+  --radius-control: 3px;
+  --radius-surface: 6px;
+  --radius-pill: 999px;
 
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  /* Light is the default so a printed or screenshot panel reads on paper. */
+  /* Light is the default so a printed or screenshot panel reads on paper.
+     `--ink-3` is the tertiary ink and it is the value most likely to drift too
+     pale, because it is the one that "looks right" at a glance while failing
+     the measurement. It carries the hints, the empty states, the file-format
+     note and the footer, and it is used over three different backgrounds
+     (--surface, --surface-2, --bg). Both themes' values below are set so that
+     the WORST of those three pairings still clears WCAG AA at 4.5:1 -- 4.91 in
+     light, 4.85 in dark -- rather than the best one. */
   --bg: #f6f6f4;
   --surface: #ffffff;
   --surface-2: #f0f0ee;
   --ink: #16181c;
   --ink-2: #565a63;
-  --ink-3: #7c828d;
+  --ink-3: #626873;
   --line: #dcdcd7;
   --line-strong: #bcbcb5;
   --accent: #1c4f8b;
@@ -68,7 +96,7 @@
     --surface-2: #22262c;
     --ink: #e8eaed;
     --ink-2: #a8aeb8;
-    --ink-3: #7e8590;
+    --ink-3: #8b929d;
     --line: #2c3138;
     --line-strong: #3d444d;
     --accent: #7fb0ea;
@@ -103,7 +131,7 @@
   --surface-2: #f0f0ee;
   --ink: #16181c;
   --ink-2: #565a63;
-  --ink-3: #7c828d;
+  --ink-3: #626873;
   --line: #dcdcd7;
   --line-strong: #bcbcb5;
   --accent: #1c4f8b;
@@ -134,7 +162,7 @@
   --surface-2: #22262c;
   --ink: #e8eaed;
   --ink-2: #a8aeb8;
-  --ink-3: #7e8590;
+  --ink-3: #8b929d;
   --line: #2c3138;
   --line-strong: #3d444d;
   --accent: #7fb0ea;
@@ -162,33 +190,70 @@
   box-sizing: border-box;
 }
 
+/* `hidden` IS A CORRECTNESS RULE HERE, NOT A TIDINESS ONE. The attribute's UA
+   default is `display: none`, which any later `display` declaration silently
+   beats -- and several components below are flex or grid. The loading banner
+   and the tier explanation both shipped visible-when-hidden for exactly that
+   reason: the panel said "Loading the WebAssembly module" underneath a module
+   that had already finished loading. On a page whose job is to state plainly
+   what it did and did not do, a stale status line is a lie with a stylesheet
+   for a cause. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   background: var(--bg);
   color: var(--ink);
   font: var(--step-0) / 1.55 var(--sans);
   margin: 0 auto;
   max-width: 78rem;
-  padding: var(--space-4) var(--space-4) var(--space-6);
+  padding: var(--space-5) var(--space-4) var(--space-7);
 }
 
+/* THE HIERARCHY, in one place.
+ *
+ * Four ranks, and no two adjacent ranks differ by size alone -- each step also
+ * moves weight, colour or letter-spacing, because on a dense page the size
+ * steps have to stay small and size alone at small steps reads as an accident.
+ *
+ *   h1        the product mark, once, mono          26px / 700 / --ink
+ *   h2        a section of the workbench            17px / 600 / --ink
+ *   h3, th    an eyebrow over a group or a column   12px / 600 / --ink-3, caps
+ *   body      the note, the table, the controls     15px and 13px / --ink
+ *   .hint     reference prose you read once         12px / --ink-3
+ *
+ * The old scale ran h1 at 32px and h2 at 21px and then dropped everything else
+ * onto one 13px step, so six sections of a cockpit all announced themselves at
+ * the same volume and none of them said which was the data. */
 h1,
 h2,
 h3 {
-  line-height: 1.25;
+  line-height: 1.2;
   margin: 0;
+  text-wrap: balance;
 }
 
 h1 {
   font-size: var(--step-3);
-  letter-spacing: -0.01em;
+  font-weight: 700;
+  letter-spacing: -0.03em;
 }
 
 h2 {
   font-size: var(--step-1);
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
+/* The eyebrow rank. Uppercase at 12px with open tracking so it reads as a
+   label for what follows rather than as a small heading competing with h2. */
 h3 {
-  font-size: var(--step-0);
+  color: var(--ink-3);
+  font-size: var(--step--2);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 p {
@@ -232,9 +297,9 @@ code,
   border-bottom: 1px solid var(--line);
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-4);
+  gap: var(--space-3) var(--space-5);
   justify-content: space-between;
-  padding: var(--space-4) 0 var(--space-4);
+  padding-bottom: var(--space-4);
 }
 
 .brand h1 {
@@ -256,18 +321,23 @@ code,
 
 /* --- banner ------------------------------------------------------------- */
 
+/* The rail weight is 3px and it is the ONLY emphasis weight on the page: the
+   banner, the warnings, the errors, the verdicts and the run status all use it,
+   so a coloured left edge always means the same thing (this block is speaking
+   in a register) and never competes with the 1px hairlines that divide. */
 .banner {
   background: var(--warn-bg);
   border: 1px solid var(--warn);
-  border-left-width: 4px;
-  border-radius: var(--radius);
-  margin: var(--space-4) 0;
+  border-left-width: 3px;
+  border-radius: var(--radius-surface);
+  margin: var(--space-4) 0 var(--space-5);
   padding: var(--space-4);
 }
 
 .banner h2 {
-  font-size: var(--step-0);
-  letter-spacing: 0.02em;
+  font-size: var(--step--1);
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -280,6 +350,7 @@ code,
 
 .banner li {
   font-size: var(--step--1);
+  line-height: 1.5;
 }
 
 .banner .bad strong {
@@ -294,13 +365,18 @@ main {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* DENSITY IS THE POINT. This is a workbench a clinician scans, not a page they
+   read, so the card is as little chrome as still groups: one hairline, one
+   surface, one padding step. The padding was --space-5 all round and the grid
+   gap another --space-5, which put 40px of nothing between two things that
+   belong to the same task. */
 .card {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-surface);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-4);
   min-width: 0;
   padding: var(--space-4);
 }
@@ -309,12 +385,17 @@ main {
   grid-column: 1 / -1;
 }
 
+/* The card head is the rhythm anchor: a hairline under every one of them puts
+   the six sections on the same horizontal grid, which is what turns a stack of
+   slabs into a page with a structure. */
 .card-head {
-  align-items: center;
+  align-items: baseline;
+  border-bottom: 1px solid var(--line);
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: var(--space-2) var(--space-4);
   justify-content: space-between;
+  padding-bottom: var(--space-3);
 }
 
 .card-head-actions {
@@ -325,13 +406,30 @@ main {
 footer {
   border-top: 1px solid var(--line);
   color: var(--ink-3);
-  font-size: var(--step--1);
-  margin-top: var(--space-5);
+  display: grid;
+  font-size: var(--step--2);
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+  max-width: 90ch;
   padding-top: var(--space-4);
 }
 
 /* --- controls ----------------------------------------------------------- */
 
+/*
+ * HAIRLINE DISCIPLINE, stated once so the rest of the file can be read against
+ * it. The page has exactly two border colours and they are not two weights of
+ * the same idea:
+ *
+ *   --line         every DIVIDER and every container edge. 1px, always.
+ *   --line-strong  every edge you can put a cursor inside: input, select,
+ *                  textarea, ghost button, dropzone. Never a divider.
+ *
+ * A control has to look like a slot you can act on, and at 1px --line in the
+ * dark theme it does not; that is the whole reason for the second value, and
+ * the reason it is confined to controls. Anything wider than 1px on this page
+ * is the 3px emphasis rail, which is a different vocabulary again.
+ */
 button,
 select,
 input[type="file"] {
@@ -341,7 +439,7 @@ input[type="file"] {
 button {
   background: var(--accent);
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   color: var(--accent-ink);
   cursor: pointer;
   font-size: var(--step--1);
@@ -358,6 +456,15 @@ button:hover {
   filter: brightness(1.08);
 }
 
+/* A ghost button has no fill for `brightness` to act on, so it acknowledged a
+   hover by doing nothing at all. It gets a surface and a darker ink instead. */
+button.ghost:hover {
+  background: var(--surface-2);
+  border-color: var(--ink-3);
+  color: var(--ink);
+  filter: none;
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
@@ -366,15 +473,27 @@ button:disabled {
 select {
   background: var(--surface-2);
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   color: var(--ink);
   font-size: var(--step--1);
   padding: 0.35rem 0.5rem;
 }
 
+/* THE FOCUS RING IS TWO RINGS. A single accent-coloured outline disappears
+   against whichever surface happens to be the same value as the accent -- the
+   selected tab, in this palette. The white/dark inner halo guarantees a
+   contrasting edge on every background the panel has, in both themes. */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+/* A mark inside a `pre` is inline and its box-shadow halo would sit under the
+   next line; the ring alone is enough there because the mark already has a
+   fill distinct from the document background. */
+mark.ent:focus-visible {
+  box-shadow: none;
 }
 
 .field {
@@ -392,7 +511,7 @@ select {
 textarea {
   background: var(--surface-2);
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   color: var(--ink);
   font: var(--step--1) / 1.6 var(--mono);
   padding: var(--space-3);
@@ -417,27 +536,33 @@ input[type="range"] {
   padding-top: 0;
 }
 
+/* Reference prose: read once, then scanned past. It drops a step below the data
+   it explains so the data is what the eye lands on, and it keeps --ink-3, whose
+   value is set so 12px still clears AA over all three backgrounds. */
 .hint {
   color: var(--ink-3);
-  font-size: var(--step--1);
+  font-size: var(--step--2);
+  line-height: 1.55;
+  max-width: 78ch;
 }
 
 .hint.stub {
   background: var(--surface-2);
   border-left: 3px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  max-width: none;
+  padding: var(--space-3);
 }
 
 .status {
   color: var(--ink-3);
-  font-size: var(--step--1);
+  font-size: var(--step--2);
 }
 
 .warn {
   background: var(--warn-bg);
   border-left: 3px solid var(--warn);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   color: var(--warn);
   font-size: var(--step--1);
   padding: var(--space-2) var(--space-3);
@@ -450,23 +575,50 @@ input[type="range"] {
   font-weight: 600;
 }
 
+/* AN ERROR IS A DESIGNED STATE, not a stylesheet's leftovers. Box hairline at
+   the one weight, the emphasis rail to say which register it is speaking in,
+   and monospace because what it carries is a `core::Error` rendering with
+   offsets and labels in it, which wraps badly in a proportional face. */
 .error {
   background: var(--danger-bg);
   border: 1px solid var(--danger);
-  border-radius: var(--radius-sm);
+  border-left-width: 3px;
+  border-radius: var(--radius-control);
   color: var(--danger);
   font-family: var(--mono);
   font-size: var(--step--1);
-  padding: var(--space-3);
+  line-height: 1.5;
+  padding: var(--space-3) var(--space-4);
 }
 
+/*
+ * AN EMPTY STATE IS ALSO A DESIGNED STATE. Dashed, because a dashed edge is the
+ * conventional "a thing goes here" and reads as waiting rather than as broken;
+ * on its own surface so it is a placeholder with a shape rather than a
+ * centred grey sentence floating in a card. Its first line is the state and
+ * any second line is what to do about it, one rank quieter.
+ */
 .empty {
+  background: var(--surface-2);
   border: 1px dashed var(--line-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   color: var(--ink-3);
+  display: grid;
   font-size: var(--step--1);
-  padding: var(--space-5);
+  gap: var(--space-1);
+  justify-items: center;
+  padding: var(--space-6) var(--space-4);
   text-align: center;
+}
+
+.empty strong {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.empty span {
+  font-size: var(--step--2);
+  max-width: 46ch;
 }
 
 .empty.small {
@@ -484,7 +636,7 @@ input[type="range"] {
 .dropzone {
   background: var(--surface-2);
   border: 1px dashed var(--line-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   display: grid;
   gap: var(--space-2);
   padding: var(--space-4);
@@ -502,7 +654,8 @@ input[type="range"] {
 
 .dz-note {
   color: var(--ink-3);
-  font-size: var(--step--1);
+  font-size: var(--step--2);
+  line-height: 1.55;
   text-align: left;
 }
 
@@ -523,7 +676,7 @@ input[type="range"] {
   align-items: center;
   background: var(--surface-2);
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   display: grid;
   gap: var(--space-2);
   grid-template-columns: auto 1fr auto;
@@ -569,7 +722,7 @@ input[type="range"] {
 .doc {
   background: var(--surface-2);
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   font: var(--step--1) / 1.7 var(--mono);
   margin: 0;
   max-height: 26rem;
@@ -586,7 +739,6 @@ input[type="range"] {
 }
 
 .split h3 {
-  color: var(--ink-2);
   margin-bottom: var(--space-2);
 }
 
@@ -596,52 +748,6 @@ input[type="range"] {
   font-family: var(--mono);
   font-size: var(--step--1);
   padding: var(--space-2) var(--space-3);
-}
-
-mark.ent {
-  border-bottom: 2px solid currentColor;
-  border-radius: 2px;
-  cursor: help;
-  padding: 0 1px;
-}
-
-mark.ent.fam-id {
-  background: var(--ent-id-bg);
-  color: var(--ent-id);
-}
-
-mark.ent.fam-contact {
-  background: var(--ent-contact-bg);
-  color: var(--ent-contact);
-}
-
-mark.ent.fam-date {
-  background: var(--ent-date-bg);
-  color: var(--ent-date);
-}
-
-mark.ent.fam-place {
-  background: var(--ent-place-bg);
-  color: var(--ent-place);
-}
-
-mark.ent.fam-name {
-  background: var(--ent-name-bg);
-  color: var(--ent-name);
-}
-
-mark.ent.fam-other {
-  background: var(--ent-other-bg);
-  color: var(--ent-other);
-}
-
-/* A span that will NOT be masked -- kept by L4, switched off, or below the
-   threshold -- is drawn as an outline rather than a fill, so "detected" and
-   "removed" never look the same. */
-mark.ent.passthrough {
-  background: transparent;
-  border: 1px dashed currentColor;
-  border-bottom-width: 1px;
 }
 
 del.diff {
@@ -662,6 +768,14 @@ ins.diff {
   overflow-x: auto;
 }
 
+/*
+ * THE SPAN MAP IS THE INSTRUMENT. Everything below serves one goal: a reviewer
+ * scans a column, not a row, and finds the outlier without reading.
+ *
+ * The table carries no vertical rules and no zebra. One 1px hairline under each
+ * row is the whole grid; the columns are held by alignment alone, which is what
+ * `--radius`-free, chrome-free density buys.
+ */
 table {
   border-collapse: collapse;
   font-size: var(--step--1);
@@ -672,27 +786,68 @@ table {
 th,
 td {
   border-bottom: 1px solid var(--line);
+  line-height: 1.4;
   padding: var(--space-2) var(--space-3);
   text-align: left;
-  vertical-align: top;
+  vertical-align: baseline;
   white-space: nowrap;
 }
 
+/* The column header is an eyebrow, not data: it drops a size step and takes the
+   tertiary ink, so the eye falls straight onto the first row of numbers. */
 th {
-  color: var(--ink-2);
+  color: var(--ink-3);
+  font-size: var(--step--2);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+/* A row header is data, not an eyebrow. Without this the per-part table would
+   uppercase the document's own part names, which are quoted from the file. */
+tbody th[scope="row"] {
+  color: var(--ink);
   font-size: var(--step--1);
   font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 td.mono {
   font-family: var(--mono);
 }
 
+/*
+ * NUMBERS FORM A COLUMN OR THEY ARE NOT A COLUMN.
+ *
+ * Byte offsets and confidences are quantities, so they are right-aligned and
+ * set in tabular figures: `55..66` and `222..232` then share a right edge and
+ * their digits sit in the same vertical tracks, which is what lets a reviewer
+ * see at a glance that one span is an order of magnitude further into the
+ * document than another. Left-aligned proportional figures made the same two
+ * values look like two unrelated strings.
+ *
+ * `font-variant-numeric` is set even though these cells are monospace: a
+ * monospace stack that falls back through to a default face is no longer
+ * fixed-pitch, and the declaration is what keeps the column true when it does.
+ */
+td.num,
+th.num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+th.num button.sort {
+  text-align: right;
+}
+
 td .pill {
   border: 1px solid currentColor;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  padding: 0 0.45rem;
+  border-radius: var(--radius-pill);
+  font-size: var(--step--2);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.05em 0.5em;
 }
 
 .pill.mask {
@@ -711,7 +866,7 @@ td .pill {
 /* --- network verdict ---------------------------------------------------- */
 
 .verdict {
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   font-family: var(--mono);
   font-size: var(--step--1);
   padding: var(--space-3);
@@ -727,6 +882,473 @@ td .pill {
   background: var(--danger-bg);
   border-left: 3px solid var(--danger);
   color: var(--danger);
+}
+
+/* --- entity family coding, three redundant channels --------------------- */
+
+/*
+ * HUE IS THE WEAKEST OF THE THREE AND IS NEVER USED ALONE.
+ *
+ * Roughly 8% of men have some colour vision deficiency. A masking tool whose
+ * families are coded by hue alone does not degrade gracefully for them -- it
+ * shows a page of marks that all look the same and gives no hint that a
+ * distinction was being made at all. So each family is drawn with:
+ *
+ *   1. a hue,
+ *   2. a distinct underline treatment -- solid, double, dotted, dashed, wavy,
+ *      thin -- which survives greyscale, a monochrome print and every form of
+ *      colour blindness,
+ *   3. a two-letter sigil rendered as real text.
+ *
+ * The exact label is always one hover or one glance at the span map away, so
+ * the mark's job is only to say "these two are different", and it says that
+ * three times over.
+ */
+
+mark.ent {
+  border-radius: var(--radius-control);
+  cursor: help;
+  padding: 0 2px;
+  text-decoration-color: currentColor;
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+mark.ent.fam-id {
+  background: var(--ent-id-bg);
+  color: var(--ent-id);
+  text-decoration-style: solid;
+}
+
+mark.ent.fam-contact {
+  background: var(--ent-contact-bg);
+  color: var(--ent-contact);
+  text-decoration-style: dotted;
+}
+
+mark.ent.fam-date {
+  background: var(--ent-date-bg);
+  color: var(--ent-date);
+  text-decoration-style: dashed;
+}
+
+mark.ent.fam-place {
+  background: var(--ent-place-bg);
+  color: var(--ent-place);
+  text-decoration-style: wavy;
+}
+
+mark.ent.fam-name {
+  background: var(--ent-name-bg);
+  color: var(--ent-name);
+  text-decoration-style: double;
+}
+
+mark.ent.fam-other {
+  background: var(--ent-other-bg);
+  color: var(--ent-other);
+  text-decoration-line: overline underline;
+  text-decoration-style: solid;
+  text-decoration-thickness: 1px;
+}
+
+/* A span that will NOT be masked -- kept by L4, switched off, or below the
+   threshold -- is drawn hollow, with no fill at all, so "detected" and
+   "removed" can never be mistaken for each other at a glance. */
+mark.ent.passthrough {
+  background: transparent;
+  outline: 1px dashed currentColor;
+  outline-offset: 1px;
+  text-decoration-line: none;
+}
+
+.sigil {
+  border: 1px solid currentColor;
+  border-radius: var(--radius-control);
+  font-family: var(--sans);
+  font-size: 0.62em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  margin-right: 0.35em;
+  padding: 0.15em 0.25em;
+  /* Never selectable, so it cannot ride along into a clipboard copy of the
+     note. A family sigil pasted into the middle of clinical text is a
+     corruption of the output. */
+  user-select: none;
+  vertical-align: 0.12em;
+}
+
+td .sigil.fam-id {
+  color: var(--ent-id);
+}
+td .sigil.fam-contact {
+  color: var(--ent-contact);
+}
+td .sigil.fam-date {
+  color: var(--ent-date);
+}
+td .sigil.fam-place {
+  color: var(--ent-place);
+}
+td .sigil.fam-name {
+  color: var(--ent-name);
+}
+td .sigil.fam-other {
+  color: var(--ent-other);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  font-size: var(--step--2);
+}
+
+.legend-item {
+  align-items: center;
+  color: var(--ink-2);
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+.legend-swatch {
+  border: 1px solid currentColor;
+  border-radius: var(--radius-control);
+  font-size: 0.9em;
+  font-weight: 700;
+  padding: 0.1em 0.3em;
+}
+
+.legend .fam-id .legend-swatch {
+  background: var(--ent-id-bg);
+  color: var(--ent-id);
+  border-bottom: 2px solid var(--ent-id);
+}
+.legend .fam-contact .legend-swatch {
+  background: var(--ent-contact-bg);
+  color: var(--ent-contact);
+  border-bottom: 2px dotted var(--ent-contact);
+}
+.legend .fam-date .legend-swatch {
+  background: var(--ent-date-bg);
+  color: var(--ent-date);
+  border-bottom: 2px dashed var(--ent-date);
+}
+.legend .fam-place .legend-swatch {
+  background: var(--ent-place-bg);
+  color: var(--ent-place);
+  border-bottom: 2px double var(--ent-place);
+}
+.legend .fam-name .legend-swatch {
+  background: var(--ent-name-bg);
+  color: var(--ent-name);
+  border-bottom: 3px double var(--ent-name);
+}
+.legend .fam-other .legend-swatch {
+  background: var(--ent-other-bg);
+  color: var(--ent-other);
+}
+.legend .legend-kept .legend-swatch {
+  background: transparent;
+  border-style: dashed;
+  color: var(--danger);
+}
+
+/* --- span and row linkage ----------------------------------------------- */
+
+/*
+ * HOVER IS FEEDBACK, SO IT IS IMMEDIATE AND IT IS SMALL.
+ *
+ * A mark in the note and its row in the span map are the same fact seen twice,
+ * and touching either lights both. The budget is 120ms; anything slower stops
+ * reading as "this is that" and starts reading as an effect, and a reviewer
+ * sweeping a mouse down 40 rows would be watching 40 of them.
+ *
+ * Not colour alone: the linked node also gains an accent edge and a weight
+ * change, so the correspondence survives greyscale and colour blindness.
+ */
+tbody tr:hover {
+  background: var(--surface-2);
+}
+
+mark.ent.linked,
+ins.diff.linked,
+del.diff.linked {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* An outline on a `tr` renders inconsistently across engines (some draw it
+   round the row box, some round each cell), so the row states its link with an
+   inset rail instead -- the same 3px emphasis rail used everywhere else. */
+tr.linked {
+  background: var(--surface-2);
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
+
+tr.linked td {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* --- the masking sweep --------------------------------------------------- */
+
+/*
+ * EVERY RULE IN THIS SECTION IS DECORATION OVER AN ALREADY-FINAL DOM.
+ *
+ * `render()` paints the answer, the span map, the counts and the live region
+ * before `animate.js` is reachable, so nothing here is load-bearing. Deleting
+ * this whole section would change how the panel looks and change nothing about
+ * what it reports or what it exports.
+ *
+ * The `prefers-reduced-motion: no-preference` wrapper is the gate: under
+ * `reduce` these keyframes are never defined as applying, `animate.js` returns
+ * before touching a single node, and the reader lands directly on the final
+ * state. Vestibular disorders are real and this is a clinical tool.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .dropzone {
+    transition: border-color 120ms ease;
+  }
+
+  .card,
+  button,
+  .tab {
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease,
+      color 120ms ease;
+  }
+
+  /* The linkage, at 90ms: under the 120ms budget because it fires on a mouse
+     sweeping down a table and has to keep up with the pointer rather than trail
+     it. The MARK's outline is deliberately NOT transitioned -- it appears the
+     instant the pointer lands, and it must never resemble the sweep, which is
+     the one animation on this page that carries meaning. */
+  tbody tr {
+    transition:
+      background-color 90ms ease,
+      box-shadow 90ms ease;
+  }
+
+  /* The outline pulse. `--sweep-delay` is set per span by animate.js from the
+     span's position in DOCUMENT ORDER, which is what makes the highlight read
+     as a pass down the note rather than as one flash. */
+  mark.ent.sweeping {
+    animation: sweep-pulse 300ms ease-out var(--sweep-delay, 0ms) both;
+  }
+
+  tr.sweeping {
+    animation: sweep-row 460ms ease-out var(--sweep-delay, 0ms) both;
+  }
+
+  mark.ent.sweeping .sur {
+    animation: sweep-text 300ms ease-out
+      calc(var(--sweep-delay, 0ms) + 140ms) both;
+  }
+
+  @keyframes sweep-pulse {
+    0% {
+      box-shadow: 0 0 0 0 currentColor;
+      filter: none;
+    }
+    35% {
+      box-shadow: 0 0 0 3px currentColor;
+    }
+    100% {
+      box-shadow: 0 0 0 0 transparent;
+    }
+  }
+
+  @keyframes sweep-text {
+    0% {
+      opacity: 0.55;
+    }
+    45% {
+      opacity: 0.75;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes sweep-row {
+    0% {
+      background: transparent;
+    }
+    25% {
+      background: var(--surface-2);
+      box-shadow: inset 3px 0 0 0 var(--accent);
+    }
+    100% {
+      background: transparent;
+      box-shadow: inset 3px 0 0 0 transparent;
+    }
+  }
+
+  .boot-bar::after {
+    animation: boot-slide 900ms ease-in-out infinite;
+  }
+
+  @keyframes boot-slide {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(300%);
+    }
+  }
+}
+
+/* --- boot, tier explanation, run status ---------------------------------- */
+
+/* THE LOADING STATE IS THE FIRST THING ANYONE SEES, so it is composed rather
+   than left to fall out of the defaults: an indeterminate rail on the left, the
+   sentence at the same rank as every other status line, and the accent rail on
+   the edge to say the panel is speaking about itself. Indeterminate and not a
+   percentage, because the module's load has no progress event this page trusts
+   and a fake percentage is the smallest possible lie to open with. */
+.boot {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-surface);
+  color: var(--ink-2);
+  display: flex;
+  font-size: var(--step--1);
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.boot-bar {
+  background: var(--surface-2);
+  border-radius: var(--radius-pill);
+  flex: none;
+  height: 4px;
+  overflow: hidden;
+  position: relative;
+  width: 4rem;
+}
+
+.boot-bar::after {
+  background: var(--accent);
+  content: "";
+  inset: 0 auto 0 0;
+  position: absolute;
+  width: 33%;
+}
+
+.tier-explain {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-surface);
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+}
+
+.tier-explain h2 {
+  font-size: var(--step-1);
+}
+
+.tier-explain p,
+.tier-explain dd {
+  color: var(--ink-2);
+  font-size: var(--step--1);
+  line-height: 1.5;
+  max-width: 68ch;
+}
+
+.tier-explain dl {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.tier-explain dt {
+  color: var(--ink);
+  font-size: var(--step--1);
+  font-weight: 700;
+}
+
+.tier-explain dd {
+  margin: var(--space-1) 0 0;
+}
+
+.run-status {
+  border-left: 3px solid var(--accent);
+  color: var(--ink);
+  font-size: var(--step--1);
+  font-weight: 600;
+  padding: var(--space-2) var(--space-3);
+}
+
+.field-group {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.net-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+
+/* --- sortable headers ---------------------------------------------------- */
+
+th:has(button.sort) {
+  padding: 0;
+}
+
+/* Square on purpose, and the one place on the page that opts out of the radius
+   scale: this button IS the header cell, filling it edge to edge, and a rounded
+   corner inside a square cell would draw a box that is not there. */
+button.sort {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--ink-3);
+  font-size: var(--step--2);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  text-transform: uppercase;
+  width: 100%;
+}
+
+button.sort:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+  filter: none;
+}
+
+.sort-arrow::after {
+  content: " \2195";
+  opacity: 0.45;
+}
+
+th[aria-sort="ascending"] button.sort,
+th[aria-sort="descending"] button.sort {
+  color: var(--ink);
+}
+
+th[aria-sort="ascending"] .sort-arrow::after {
+  content: " \2191";
+  opacity: 1;
+}
+
+th[aria-sort="descending"] .sort-arrow::after {
+  content: " \2193";
+  opacity: 1;
 }
 
 /* --- responsive --------------------------------------------------------- */
@@ -751,8 +1373,21 @@ td .pill {
     flex-direction: column;
   }
 
+  h1 {
+    font-size: var(--step-3);
+  }
+
   .card {
+    gap: var(--space-3);
     padding: var(--space-3);
+  }
+
+  .card-head {
+    /* The heading and its actions stop competing for one line: at this width
+       the flex row wraps into a stack with the actions left-aligned under the
+       title rather than orphaned against the right edge. */
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .entity-row {
@@ -762,10 +1397,207 @@ td .pill {
   .entity-row select {
     grid-column: 1 / -1;
   }
+
+  /* The tab strip is the one control that cannot wrap gracefully at 320px, so
+     it scrolls on its own axis. The BODY must never scroll horizontally. */
+  .tabs {
+    overflow-x: auto;
+    max-width: 100%;
+    scrollbar-width: thin;
+  }
+
+  .tab {
+    flex: none;
+  }
+
+  .field-group {
+    flex-wrap: wrap;
+  }
+
+  .topbar-actions select {
+    max-width: 100%;
+  }
 }
 
+/* NO `overflow-x: hidden` ON THE BODY, deliberately. That rule hides a
+   horizontal overflow instead of fixing one, and what it hides here would be a
+   column of the span map or the end of an identifier. Every wide thing on this
+   page instead lives in its own scroll container -- `.table-scroll`, `.doc`,
+   `.tabs` -- so the document itself is never wider than the viewport and
+   nothing is clipped away where it cannot be reached. */
+
+/* --- file handling: detection, progress, refusal, binary result --------- */
+
+/*
+ * THE FILE VERDICT BLOCK. Present for every format, because "we read this as a
+ * CSV" is worth knowing even when nothing went wrong -- and it is the only
+ * place a reader learns that the decision came from the bytes rather than the
+ * extension.
+ */
+.file-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+}
+
+.file-what {
+  color: var(--ink-2);
+  font-size: var(--step--1);
+  margin: 0;
+}
+
+.readonly-note {
+  border-left: 3px solid var(--line-strong);
+  padding-left: var(--space-3);
+}
+
+.file-progress {
+  align-items: center;
+  display: flex;
+  gap: var(--space-3);
+}
+
+.file-bar {
+  background: var(--surface-2);
+  border-radius: var(--radius-pill);
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+}
+
+.file-bar > span {
+  background: var(--accent);
+  display: block;
+  height: 100%;
+  width: 0;
+}
+
+/*
+ * The fill is animated ONLY where motion is welcome. Under `reduce` the width
+ * still changes -- the reader still sees progress -- it just snaps rather than
+ * sliding. Progress feedback is information, so it is never removed entirely;
+ * the transition is the decoration and that is what the query drops.
+ */
 @media (prefers-reduced-motion: no-preference) {
-  .dropzone {
-    transition: border-color 120ms ease;
+  .file-bar > span {
+    transition: width 120ms linear;
   }
+}
+
+.file-progress-text,
+#file-progress-text {
+  color: var(--ink-3);
+  font-size: var(--step--2);
+}
+
+/*
+ * A REFUSAL IS LOUD ON PURPOSE.
+ *
+ * The failure this styling guards against is someone skimming past a grey line,
+ * assuming the job worked, and going looking for a download. So it is a full
+ * bordered block in the danger colour with its own heading, and there is no
+ * button of any kind inside it.
+ */
+.file-refusal {
+  background: var(--danger-bg);
+  border: 1px solid var(--danger);
+  border-left-width: 3px;
+  border-radius: var(--radius-surface);
+  color: var(--danger);
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+}
+
+/* The refusal title is a real heading, not an eyebrow, so it opts out of the
+   uppercase eyebrow rank: "This file was refused. No output." is a sentence a
+   person reads, and uppercasing a sentence costs the word shapes that make it
+   readable at a glance. It is the one thing on the page that must be. */
+.file-refusal h3,
+#images-warning h3 {
+  color: inherit;
+  font-size: var(--step-1);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--space-2);
+  text-transform: none;
+}
+
+.file-refusal p {
+  font-size: var(--step--1);
+  line-height: 1.5;
+  margin: 0 0 var(--space-2);
+}
+
+.file-refusal p:last-child {
+  margin-bottom: 0;
+}
+
+.file-refusal-why {
+  font-family: var(--mono);
+  font-size: var(--step--2) !important;
+}
+
+.file-refusal-ocr {
+  border-top: 1px solid var(--danger);
+  padding-top: var(--space-3);
+}
+
+/*
+ * The one opt-in control inside a refusal. It is styled as a plain checkbox and
+ * NOT as a button: a button invites a click as the way out of an error, and
+ * this is a decision about a document, not a retry.
+ */
+.check {
+  align-items: center;
+  display: flex;
+  font-size: var(--step--1);
+  font-weight: 600;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+/*
+ * The list of images that were not read. Monospace so a column of dimensions
+ * lines up and an outlier is visible at a glance.
+ */
+#images-warning-list {
+  font-size: var(--step--2);
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+/*
+ * The binary result card. Its verdict is the first thing in it and the card
+ * sits directly under the source, so a passed verification is on the first
+ * screen rather than below the span map where nobody would look for it.
+ */
+.binary-card > .verdict {
+  font-size: var(--step-0);
+  margin-bottom: var(--space-2);
+  padding: var(--space-4);
+}
+
+/* An eyebrow over the per-part table, so it takes the h3 rank as written. The
+   generous top margin is the group break: it separates the breakdown from the
+   download above it without a second divider. */
+.binary-card h3 {
+  margin: var(--space-5) 0 var(--space-2);
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+button.primary:disabled {
+  background: var(--surface-2);
+  border-color: var(--line);
+  color: var(--ink-3);
+  cursor: not-allowed;
 }

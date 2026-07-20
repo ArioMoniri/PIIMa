@@ -486,6 +486,7 @@ pub fn run(
     output: &Path,
     tier: Tier,
     opts: BatchOpts,
+    l3: &crate::l3::L3Config,
     progress: &mut dyn Write,
 ) -> Result<Summary, BatchError> {
     if !input.is_dir() {
@@ -497,7 +498,11 @@ pub fn run(
     std::fs::create_dir_all(output).map_err(|_| BatchError::OutputUnwritable)?;
 
     let entries = enumerate(input, opts.recursive)?;
-    let pipeline = mask::build(tier, opts.mask)?;
+    let pipeline = mask::build(&mask::Build {
+        tier,
+        opts: opts.mask,
+        l3,
+    })?;
 
     let mut manifest = std::fs::File::create(output.join(MANIFEST_NAME))
         .map_err(|_| BatchError::ManifestUnwritable)?;
@@ -634,7 +639,15 @@ mod tests {
     }
 
     fn run_batch(input: &Path, output: &Path, opts: BatchOpts) -> Summary {
-        run(input, output, Tier::SafeHarbor, opts, &mut Vec::new()).expect("batch run")
+        run(
+            input,
+            output,
+            Tier::SafeHarbor,
+            opts,
+            &crate::l3::L3Config::default(),
+            &mut Vec::new(),
+        )
+        .expect("batch run")
     }
 
     fn manifest_of(output: &Path) -> Vec<serde_json::Value> {
@@ -911,6 +924,7 @@ mod tests {
                 &candidate,
                 Tier::SafeHarbor,
                 opts(),
+                &crate::l3::L3Config::default(),
                 &mut Vec::new(),
             );
             assert!(
@@ -929,6 +943,7 @@ mod tests {
             &output,
             Tier::SafeHarbor,
             opts(),
+            &crate::l3::L3Config::default(),
             &mut Vec::new(),
         );
         assert!(matches!(refused, Err(BatchError::NotADirectory)));
@@ -958,7 +973,15 @@ mod tests {
         let output = scratch("out");
         write(&input, "ayse-yilmaz-2026.txt", &note());
         let mut progress = Vec::new();
-        run(&input, &output, Tier::SafeHarbor, opts(), &mut progress).expect("run");
+        run(
+            &input,
+            &output,
+            Tier::SafeHarbor,
+            opts(),
+            &crate::l3::L3Config::default(),
+            &mut progress,
+        )
+        .expect("run");
         let printed = String::from_utf8(progress).expect("utf8");
         assert!(printed.contains("[1/1]"));
         assert!(printed.contains("masked"));

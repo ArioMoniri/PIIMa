@@ -174,6 +174,34 @@ const trap = (name) =>
     throw new Error(`${name} was called -- the module tried to use the network`);
   };
 
+// Install a global by DEFINING the property, not by assigning to it.
+//
+// WHY: Node 20+ exposes `globalThis.navigator` as an accessor with a getter and
+// no setter, so `globalThis.navigator = ...` throws in an ES module (modules are
+// always strict). On Node 23.11 that threw here before the runtime proof below
+// ever ran -- so the two static checks above passed, the process exited 1, and
+// the part of this file that actually exercises the module never executed.
+//
+// `defineProperty` replaces the property descriptor outright and works for both
+// shapes: a plain writable data property (`fetch`) and a getter-only accessor
+// (`navigator`).
+function installGlobal(name, value) {
+  Object.defineProperty(globalThis, name, {
+    value,
+    configurable: true,
+    writable: true,
+  });
+  // Then PROVE it took. A trap that silently failed to install is worse than no
+  // trap: the run goes green while the thing it was watching for is unwatched.
+  // That is the failure this file exists to prevent, so it must not be the
+  // failure this file contains.
+  assert.strictEqual(
+    globalThis[name],
+    value,
+    `the ${name} trap did not install, so this proof would pass without watching ${name}`,
+  );
+}
+
 for (const name of [
   "fetch",
   "XMLHttpRequest",
@@ -184,9 +212,13 @@ for (const name of [
   "WebTransport",
   "RTCPeerConnection",
 ]) {
-  globalThis[name] = trap(name);
+  installGlobal(name, trap(name));
 }
-globalThis.navigator = new Proxy(
+
+// `navigator` is a Proxy rather than a throwing function because the property
+// READ is the thing to catch -- `navigator.sendBeacon` is a send, and reading it
+// at all is the signal. Every other global above is called, not read.
+const navigatorTrap = new Proxy(
   {},
   {
     get(_target, property) {
@@ -195,6 +227,28 @@ globalThis.navigator = new Proxy(
     },
   },
 );
+installGlobal("navigator", navigatorTrap);
+
+// SELF-TEST THE INSTRUMENT before trusting it. Reading `navigator.sendBeacon`
+// must throw AND must be recorded in `fired`, because the final assertion of
+// this file is `fired` being empty -- and an empty array proves nothing unless
+// something is known to be able to fill it. A recorder that never records makes
+// every run green regardless of what the module did.
+assert.throws(
+  () => globalThis.navigator.sendBeacon,
+  "the navigator Proxy does not trap property reads",
+);
+assert.deepStrictEqual(
+  fired,
+  ["navigator.sendBeacon"],
+  "the trap threw but did not record, so `fired` cannot witness a real call",
+);
+
+// Clear the deliberate self-test entry. This is the ONLY place `fired` is reset,
+// and it happens before the module is loaded, so nothing the module does can be
+// erased by it.
+fired.length = 0;
+console.log("ok  networking globals trapped; traps and recorder both self-tested");
 
 const require = createRequire(import.meta.url);
 const deid = require(gluePath);

@@ -41,13 +41,17 @@
         </p>
       </div>
       <div class="topbar-actions">
-        <label class="field compact" for="tier">Assurance tier</label>
-        <select id="tier">
-          <option value="safe-harbor" selected>Safe Harbor (L1 + L4 + L5)</option>
-          <option value="expert-determination">
-            Expert Determination - unavailable
-          </option>
-        </select>
+        <div class="field-group">
+          <label class="field compact" for="tier">Assurance tier</label>
+          <select id="tier" aria-describedby="tier-explain">
+            <option value="safe-harbor" selected>
+              Safe Harbor - L1 + L4 + L5
+            </option>
+            <option value="expert-determination">
+              Expert Determination - unavailable in this build
+            </option>
+          </select>
+        </div>
         <button id="theme" type="button" aria-pressed="false">
           Dark theme
         </button>
@@ -58,7 +62,8 @@
       THE BANNER IS THE MOST IMPORTANT ELEMENT ON THE PAGE. A clinician who
       pastes a note and sees identifiers disappear will assume the name went
       with them. It did not. This states that at the top, in the reading order,
-      before any output.
+      before any output. Nothing below is allowed to push it off the first
+      screen, and no animation, count or status line may imply otherwise.
     -->
     <aside class="banner" role="note" aria-labelledby="banner-title">
       <h2 id="banner-title">What this panel does and does not remove</h2>
@@ -87,7 +92,39 @@
       </ul>
     </aside>
 
-    <main>
+    <!--
+      The tier explanation is a persistent region rather than a transient error,
+      because "why can this build not do the thing the selector offers" is a
+      standing question about the product, not an incident. It is populated and
+      revealed by panel.js when Expert Determination is selected.
+    -->
+    <aside
+      id="tier-explain"
+      class="tier-explain"
+      role="note"
+      aria-live="polite"
+      hidden
+    ></aside>
+
+    <!--
+      Real loading state. The module is most of a megabyte of WebAssembly -- it
+      carries the PDF and DOCX parsers as well as the rules layer -- and its
+      top-level await runs before any control is wired, so without this the page
+      sits as a dead-looking form for the duration of the load.
+
+      NO SIZE IS WRITTEN HERE. The exact figure is measured at runtime from the
+      bytes actually fetched and written into `#build` by panel.js. A page whose
+      claim is that you can audit it cannot carry a hand-maintained number about
+      its own weight: the number would be wrong the first time the module grew,
+      and being wrong about your own size is the cheapest possible way to lose a
+      reader's trust in the claims they cannot check as easily.
+    -->
+    <div id="boot" class="boot" role="status" aria-live="polite">
+      <span class="boot-bar" aria-hidden="true"></span>
+      Loading the WebAssembly module from this origin. Nothing else is fetched.
+    </div>
+
+    <main id="app" class="app" aria-busy="true">
       <section class="card" aria-labelledby="source-title">
         <div class="card-head">
           <h2 id="source-title">Source note</h2>
@@ -105,18 +142,110 @@
             <input
               id="file"
               type="file"
-              accept=".txt,.csv,.json,.md,text/plain,text/csv,application/json,text/markdown"
+              accept=".txt,.csv,.json,.jsonl,.md,.pdf,.docx,text/plain,text/csv,application/json,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             />
           </p>
           <p class="dz-note">
-            Plain text formats only: <code>.txt</code>, <code>.csv</code>,
-            <code>.json</code>, <code>.md</code>.
-            <strong>PDF and DOCX are handled by the CLI, not here.</strong>
-            Extracting text from those formats needs a parser, and a redacted
-            PDF must also have its text layer and its metadata scrubbed and then
-            verified - work that does not belong in a page whose whole claim is
-            that it ships no extra runtime. Use
-            <code class="mono">deid-tr</code> on the command line for them.
+            <code>.txt</code>, <code>.csv</code>, <code>.json</code>,
+            <code>.md</code>, <code>.jsonl</code>, <code>.pdf</code> and
+            <code>.docx</code>. The parsers are compiled into this page's
+            WebAssembly - the same Rust the CLI runs - so a PDF is redacted
+            here, in this tab, with nothing uploaded.
+          </p>
+          <!--
+            THE DETECTION RULE, STATED WHERE IT APPLIES. It is not a detail: a
+            PDF renamed `.txt` masked AS TEXT would have its compressed bytes
+            rewritten into nonsense while every identifier survived, and the
+            result would look processed. So the bytes decide and the name is
+            only ever a tie-breaker between the text-shaped formats, which have
+            no magic number to tell them apart.
+          -->
+          <p class="dz-note">
+            <strong>The format is decided by the file's contents</strong>, not
+            its extension. If the two disagree the panel says so and follows the
+            bytes.
+          </p>
+          <p class="dz-note">
+            Ceiling: <strong id="dz-max">8.0 MB</strong>. Larger files are
+            refused before the read starts rather than after you have waited.
+          </p>
+        </div>
+
+        <!--
+          THE FILE VERDICT. Everything about the file that is not the text
+          itself: what it was detected as, whether that matched its name, and
+          how far the read got. Present for every format, because "we read this
+          as a CSV" is worth knowing even when nothing went wrong.
+        -->
+        <div id="file-panel" class="file-panel" hidden>
+          <p id="file-what" class="file-what"></p>
+          <p id="file-mismatch" class="warn strong" hidden></p>
+          <div id="file-progress" class="file-progress" hidden>
+            <span class="file-bar" aria-hidden="true"
+              ><span id="file-bar-fill"></span
+            ></span>
+            <span id="file-progress-text" class="mono"></span>
+          </div>
+        </div>
+
+        <!--
+          A REFUSAL IS NOT AN ERROR MESSAGE. It is the product working. It gets
+          `role="alert"` and its own loud styling because the failure this
+          guards against is someone skimming past a grey line and assuming they
+          have a redacted file. There is no download button anywhere inside it.
+        -->
+        <div
+          id="file-refusal"
+          class="file-refusal"
+          role="alert"
+          aria-labelledby="file-refusal-title"
+          hidden
+        >
+          <h3 id="file-refusal-title">This file was refused. No output.</h3>
+          <p id="file-refusal-why" class="file-refusal-why"></p>
+          <p>
+            <strong>Nothing was produced and there is nothing to download.</strong>
+            A file that looks processed and is not is the most dangerous thing
+            this tool could hand back, so it hands back nothing instead.
+          </p>
+          <!--
+            THE HYBRID CASE: a page that has real text AND images. Shown only
+            for that refusal, because it is the one a reader can act on: the
+            checkbox below lets them proceed, and it deliberately does not
+            promise them anything about what the images contain.
+          -->
+          <div id="file-refusal-images" class="file-refusal-ocr" hidden>
+            <p>
+              That page has text deid-tr <em>can</em> read and images it
+              <em>cannot</em>. It redacts text and never touches pixels, so
+              those images would have come back untouched inside a file that
+              said "redacted" on it. A small image in a Turkish clinical report
+              is very often a QR or barcode carrying the protokol or patient
+              number; a wide short one is usually a signature or letterhead.
+              <strong
+                >deid-tr does not decode images and cannot tell you which this
+                is.</strong
+              >
+            </p>
+            <label class="check">
+              <input id="allow-images" type="checkbox" />
+              Redact the text anyway, and tell me which images were skipped
+            </label>
+            <p class="hint">
+              Ticking this changes nothing about the images: they still travel
+              into the output unread. It changes only whether you get the file,
+              and every skipped image is then listed by page and pixel size
+              beside the result. Drop the file again after ticking it.
+            </p>
+          </div>
+          <p id="file-refusal-ocr" class="file-refusal-ocr" hidden>
+            The text on that page is <em>pixels</em>, not characters. Removing
+            it needs OCR to find the words and an image editor to paint them
+            out. <strong>deid-tr has neither and will not pretend to.</strong>
+            Redacting only a scan's searchable text layer would strip the copy a
+            search can find and leave the identifier plainly visible in the
+            image - a file that passes every extraction check and still shows
+            the name.
           </p>
         </div>
 
@@ -127,9 +256,134 @@
           rows="10"
           placeholder="Paste or type a note. De-identification re-runs as you type."
         ></textarea>
-        <p id="input-status" class="status" role="status" aria-live="polite">
+        <!--
+          Revealed by panel.js when a binary format is loaded. A PDF's text is a
+          decoded view of glyph codes placed by content-stream operators; there
+          is no edit a person could make here that maps back onto those bytes.
+          So the box goes read-only and says why, rather than accepting typing
+          that could never be saved.
+        -->
+        <p id="binary-readonly-note" class="status readonly-note" hidden>
+          Read-only: this is the text extracted from the file, shown so you can
+          see what was scanned. It cannot be edited back into the document -
+          the redacted file is the download above.
+        </p>
+        <p id="input-status" class="status">
           Empty. Paste a note, drop a file, or load the sample.
         </p>
+        <!--
+          THE OUTCOME, IN WORDS, FOR A SCREEN READER. This is the authoritative
+          result announcement and it is written on every run, animated or not.
+          The animation is decoration layered over an already-final DOM; this
+          line and the span map below are what actually carry the result.
+        -->
+        <p id="run-status" class="run-status" role="status" aria-live="polite">
+          No note loaded.
+        </p>
+      </section>
+
+      <!--
+        THE BINARY-FORMAT CARD. Hidden entirely for text formats, which keep the
+        editor experience unchanged.
+
+        It sits HIGH in the document, directly after the source, because the
+        verification verdict is the strongest claim this feature makes and a
+        claim that has to be scrolled to is a claim most readers never see. The
+        tool re-opens the file it just wrote and looks for the identifiers it
+        removed; a pass is a checked property of the output bytes, not a
+        statement about the redactor's intentions. Users will not think to ask
+        for that, so it is shown rather than offered.
+      -->
+      <section
+        id="binary-card"
+        class="card wide binary-card"
+        aria-labelledby="binary-title"
+        hidden
+      >
+        <div class="card-head">
+          <h2 id="binary-title">Redacted file</h2>
+        </div>
+
+        <p id="verification" class="verdict" role="status" aria-live="polite"></p>
+        <p id="verification-detail" class="hint"></p>
+
+        <!--
+          IMAGES THAT WERE NOT READ, directly under the verification verdict and
+          above the download button. Position is the whole argument: the verdict
+          says "every identifier it removed is gone from the output", which is
+          true and is narrower than it sounds, and a reader who takes it as "this
+          file is clean" has to walk past this block to reach the download. It is
+          `role="alert"` for the same reason the refusal is.
+        -->
+        <div
+          id="images-warning"
+          class="file-refusal"
+          role="alert"
+          aria-labelledby="images-warning-title"
+          hidden
+        >
+          <h3 id="images-warning-title">Part of this document was not read.</h3>
+          <p id="images-warning-why"></p>
+          <ul id="images-warning-list" class="mono"></ul>
+        </div>
+
+        <!--
+          The download is the only way to get the result of a binary redaction,
+          so it is a primary control rather than one of the exports below. It is
+          created from a Blob of the bytes the wasm module returned and saved by
+          the browser. It does not exist at all on a refusal.
+        -->
+        <div class="row">
+          <button id="download-file" type="button" class="primary">
+            Download redacted file
+          </button>
+          <span id="download-note" class="status"></span>
+        </div>
+
+        <!--
+          THE BANNER'S CLAIM, RESTATED AT THE POINT OF DOWNLOAD. A reader who
+          scrolled past the banner to drop a PDF is about to save a file they
+          will treat as de-identified. A PDF with names in it comes back with
+          those names in it, and that has to be as unmissable for a file as it
+          is for pasted text -- more so, because nobody re-reads a saved PDF the
+          way they re-read a textarea.
+        -->
+        <p class="warn strong">
+          <strong>The downloaded file still contains every name.</strong>
+          Patient, clinician and relative names are L2's job and no L2 model is
+          loaded in this build, so deid-tr masked zero names in it. What was
+          removed is the rule-detectable set: TCKN, VKN, IBAN, phone, e-mail,
+          MRN and dates.
+        </p>
+
+        <h3>What was found, by <span id="part-noun">part</span></h3>
+        <p class="hint">
+          A region with a count of zero was read and had nothing in it. That is
+          a different fact from a region that was never reached, and both are
+          listed.
+        </p>
+        <div class="table-scroll">
+          <table>
+            <caption class="visually-hidden">
+              Each page or package part of the document and how many spans were
+              removed from it.
+            </caption>
+            <thead>
+              <!--
+                TWO COLUMNS, NOT THREE. An earlier revision had a "characters
+                read" column; the binding does not report a per-part text length
+                and inventing one from the preview would have been a number that
+                looked measured and was not.
+              -->
+              <tr>
+                <th scope="col">Page or part</th>
+                <th scope="col" class="num">Spans removed</th>
+              </tr>
+            </thead>
+            <tbody id="parts"></tbody>
+          </table>
+        </div>
+        <p id="stripped" class="hint"></p>
       </section>
 
       <section class="card" aria-labelledby="controls-title">
@@ -169,8 +423,9 @@
             <strong>left in the output unchanged</strong>.
           </p>
           <div id="entity-controls" class="entity-list"></div>
-          <p id="entity-empty" class="hint">
-            Nothing detected yet.
+          <p id="entity-empty" class="empty small">
+            <strong>Nothing detected yet.</strong>
+            <span>Load a note to see its entity types here.</span>
           </p>
           <p class="hint stub">
             <strong>Redaction methods are a panel-side preview.</strong> Only
@@ -191,14 +446,24 @@
           <h2 id="output-title">Output</h2>
           <div class="tabs" role="tablist" aria-label="Output view">
             <button
-              id="tab-highlight"
+              id="tab-masked"
               class="tab"
               role="tab"
               aria-selected="true"
+              aria-controls="view-masked"
+              type="button"
+            >
+              Masked
+            </button>
+            <button
+              id="tab-highlight"
+              class="tab"
+              role="tab"
+              aria-selected="false"
               aria-controls="view-highlight"
               type="button"
             >
-              Highlight
+              Marked source
             </button>
             <button
               id="tab-split"
@@ -223,20 +488,70 @@
           </div>
         </div>
 
+        <!--
+          THE LEGEND IS NOT DECORATION. Roughly one man in twelve has a colour
+          vision deficiency, so every family below is carried by THREE redundant
+          channels: a hue, a distinct underline treatment, and a two-letter
+          sigil printed on the marked-source view and in the span map's label
+          column. A reader who sees no colour at all still gets the family from
+          the underline and the sigil, and the exact label from the span map.
+        -->
+        <div class="legend" role="group" aria-label="Entity family key">
+          <span class="legend-item fam-id"
+            ><span class="legend-swatch" aria-hidden="true">ID</span>
+            identifier numbers</span
+          >
+          <span class="legend-item fam-contact"
+            ><span class="legend-swatch" aria-hidden="true">CT</span>
+            contact</span
+          >
+          <span class="legend-item fam-date"
+            ><span class="legend-swatch" aria-hidden="true">DT</span> dates and
+            ages</span
+          >
+          <span class="legend-item fam-place"
+            ><span class="legend-swatch" aria-hidden="true">PL</span> places</span
+          >
+          <span class="legend-item fam-name"
+            ><span class="legend-swatch" aria-hidden="true">NM</span> names</span
+          >
+          <span class="legend-item fam-other"
+            ><span class="legend-swatch" aria-hidden="true">OT</span> other</span
+          >
+          <span class="legend-item legend-kept"
+            ><span class="legend-swatch" aria-hidden="true">--</span> detected,
+            NOT masked</span
+          >
+        </div>
+
+        <div
+          id="view-masked"
+          class="view"
+          role="tabpanel"
+          aria-labelledby="tab-masked"
+        >
+          <p class="hint">
+            The de-identified note. Each masked span is shown as its
+            replacement; a span that was detected but
+            <strong>left in the output</strong> is drawn as a dashed outline
+            around the original text. Hover or focus a span to highlight its row
+            in the span map.
+          </p>
+          <pre id="masked" class="doc" tabindex="0"></pre>
+        </div>
+
         <div
           id="view-highlight"
           class="view"
           role="tabpanel"
           aria-labelledby="tab-highlight"
+          hidden
         >
           <p class="hint">
-            The source, with every detected span marked. Focus or hover a mark
-            for its provenance.
+            The source note, unchanged, with every detected span marked in
+            place. Focus or hover a mark for its provenance.
           </p>
           <pre id="highlight" class="doc" tabindex="0"></pre>
-          <p id="span-detail" class="detail" role="status" aria-live="polite">
-            No span selected.
-          </p>
         </div>
 
         <div
@@ -271,8 +586,25 @@
           <pre id="inline-diff" class="doc"></pre>
         </div>
 
+        <!--
+          THE PROVENANCE LINE LIVES OUTSIDE THE TAB PANELS, deliberately. It was
+          inside the marked-source panel, which meant two things: the masked
+          view's marks announced nothing at all, and the live region itself was
+          inside a `hidden` element for three of the four views - and a live
+          region in a hidden subtree is not announced. Here it serves every
+          view, and it is never hidden.
+        -->
+        <p id="span-detail" class="detail" role="status" aria-live="polite">
+          No span selected. Focus or hover a mark for its label, layer,
+          confidence, byte offsets and outcome.
+        </p>
+
         <div id="output-empty" class="empty">
-          Nothing to show yet. The output appears as you type.
+          <strong>Nothing to show yet.</strong>
+          <span
+            >Paste a note above, drop a text file, or load the sample. The
+            output appears as you type.</span
+          >
         </div>
         <div id="output-error" class="error" role="alert" hidden></div>
       </section>
@@ -286,16 +618,45 @@
           <table>
             <caption class="visually-hidden">
               Every candidate span, its byte offsets in the original and the
-              output, its provenance and its replacement.
+              output, its provenance and its replacement. The offset, label and
+              confidence columns are sortable.
             </caption>
             <thead>
               <tr>
-                <th scope="col">Bytes in</th>
-                <th scope="col">Bytes out</th>
-                <th scope="col">Label</th>
+                <!--
+                  `num` on a header is not styling for its own sake: it is what
+                  puts the column's label over the right edge its digits share,
+                  so the header and the figures below it read as one column
+                  rather than as a left-aligned title above right-aligned data.
+                -->
+                <th
+                  scope="col"
+                  class="num"
+                  aria-sort="ascending"
+                  data-sort="offset"
+                >
+                  <button type="button" class="sort" data-sort="offset">
+                    Bytes in<span class="sort-arrow" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" class="num">Bytes out</th>
+                <th scope="col" aria-sort="none" data-sort="label">
+                  <button type="button" class="sort" data-sort="label">
+                    Label<span class="sort-arrow" aria-hidden="true"></span>
+                  </button>
+                </th>
                 <th scope="col">Layer</th>
                 <th scope="col">Decision</th>
-                <th scope="col">Conf.</th>
+                <th
+                  scope="col"
+                  class="num"
+                  aria-sort="none"
+                  data-sort="confidence"
+                >
+                  <button type="button" class="sort" data-sort="confidence">
+                    Conf.<span class="sort-arrow" aria-hidden="true"></span>
+                  </button>
+                </th>
                 <th scope="col">Checksum</th>
                 <th scope="col">Method</th>
                 <th scope="col">Replacement</th>
@@ -304,7 +665,13 @@
             <tbody id="spans"></tbody>
           </table>
         </div>
-        <p id="spans-empty" class="empty small">No spans yet.</p>
+        <p id="spans-empty" class="empty">
+          <strong>No spans yet.</strong>
+          <span
+            >The span map is the authoritative record of what was detected and
+            what was masked.</span
+          >
+        </p>
       </section>
 
       <section class="card wide" aria-labelledby="export-title">
@@ -320,7 +687,7 @@
           <button id="export-text" type="button">De-identified text</button>
           <button id="export-json" type="button">Span map (JSON)</button>
           <button id="export-csv" type="button">Span map (CSV)</button>
-          <button id="export-html" type="button">Highlight view (HTML)</button>
+          <button id="export-html" type="button">Marked source (HTML)</button>
         </div>
         <p id="export-status" class="status" role="status" aria-live="polite"></p>
       </section>
@@ -338,42 +705,51 @@
           still read "No network call". A privacy tool that overstates its own
           instrument is worse than one that claims less.
         -->
-        <p class="hint">
-          <strong>What is blocked.</strong> This page's Content-Security-Policy
-          is <code class="mono">default-src 'none'</code> with
-          <code class="mono">img-src 'none'</code> and
-          <code class="mono">font-src 'none'</code>;
-          <code class="mono">connect-src 'self'</code> permits exactly one
-          request, the module loading its own <code class="mono">.wasm</code>
-          from this origin. The browser refuses everything else before it
-          reaches the network, including image, media and font loads that no
-          script can intercept.
-        </p>
-        <p class="hint">
-          <strong>What is stubbed.</strong> Every networking global a script can
-          name - <code class="mono">fetch</code>,
-          <code class="mono">XMLHttpRequest</code>,
-          <code class="mono">WebSocket</code>,
-          <code class="mono">EventSource</code>,
-          <code class="mono">WebTransport</code>,
-          <code class="mono">RTCPeerConnection</code>,
-          <code class="mono">navigator.sendBeacon</code> - was replaced with a
-          throwing stub immediately after the module's own bytes were fetched
-          and before any note could be read. These are function replacements, so
-          they cover calls and nothing else: a declarative load such as
-          <code class="mono">new Image().src</code> is not a call on a global
-          and no stub can see it.
-        </p>
-        <p class="hint">
-          <strong>What is measured.</strong> The counter above reads the
-          browser's own resource timeline, which records every request the page
-          actually made regardless of how it was made - so it covers the
-          declarative loads the stubs cannot. Any non-zero reading turns the
-          verdict red. Open devtools, switch to the Network tab and reload: you
-          will see this document, the stylesheet, the scripts, the wasm-bindgen
-          glue and the .wasm module, and nothing after that no matter what you
-          paste.
-        </p>
+        <div class="net-grid">
+          <p class="hint">
+            <strong>What is blocked.</strong> This page's
+            Content-Security-Policy is
+            <code class="mono">default-src 'none'</code> with
+            <code class="mono">img-src 'none'</code> and
+            <code class="mono">font-src 'none'</code>;
+            <code class="mono">connect-src 'self'</code> permits exactly one
+            request, the module loading its own <code class="mono">.wasm</code>
+            from this origin. The browser refuses everything else before it
+            reaches the network, including image, media and font loads that no
+            script can intercept.
+          </p>
+          <p class="hint">
+            <strong>What is stubbed.</strong> Every networking global a script
+            can name - <code class="mono">fetch</code>,
+            <code class="mono">XMLHttpRequest</code>,
+            <code class="mono">WebSocket</code>,
+            <code class="mono">EventSource</code>,
+            <code class="mono">WebTransport</code>,
+            <code class="mono">RTCPeerConnection</code>,
+            <code class="mono">navigator.sendBeacon</code> - was replaced with a
+            stub immediately after the module's own bytes were fetched and
+            before any note could be read. The first six throw.
+            <code class="mono">navigator.sendBeacon</code> records the call and
+            returns <code class="mono">false</code> rather than throwing,
+            because <code class="mono">sendBeacon</code>'s contract is to return
+            a boolean and a caller is entitled to read one; it still sends
+            nothing and still increments the counter above. These are function
+            replacements,
+            so they cover calls and nothing else: a declarative load such as
+            <code class="mono">new Image().src</code> is not a call on a global
+            and no stub can see it.
+          </p>
+          <p class="hint">
+            <strong>What is measured.</strong> The counter above reads the
+            browser's own resource timeline, which records every request the
+            page actually made regardless of how it was made - so it covers the
+            declarative loads the stubs cannot. Any non-zero reading turns the
+            verdict red. Open devtools, switch to the Network tab and reload:
+            you will see this document, the stylesheet, the scripts, the
+            wasm-bindgen glue and the .wasm module, and nothing after that no
+            matter what you paste.
+          </p>
+        </div>
       </section>
     </main>
 
@@ -384,6 +760,15 @@
         would need <code class="mono">onnxruntime-web</code> and a trained
         checkpoint; L3 would need a WebGPU-hosted local model. Neither is
         bundled, and the panel says so rather than degrading quietly.
+      </p>
+      <p>
+        The module also carries the container parsers - DEFLATE, PKZIP, the
+        OOXML part sweep and an ISO 32000-1 PDF object model - which is why it
+        weighs what the figure at the top of the page says it does. That figure
+        is measured from the bytes this tab actually fetched, not written into
+        the markup, so it cannot drift away from the build you are running. The
+        parsers are the reason a PDF can be redacted here instead of being sent
+        somewhere that has them.
       </p>
     </footer>
 
