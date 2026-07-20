@@ -2142,3 +2142,75 @@ containers does not hold, because containers are where deployments actually happ
   asymmetry D-035 accepted.
 - None of this makes the service safe to expose. It makes exposing it a decision someone made, named
   an address for, and generated a credential for.
+
+## D-041 — The desktop app links the native crates, is held out of the workspace, and ships with mobile unbuilt
+
+- **Date:** 2026-07-20
+- **Status:** ACCEPTED
+
+**The decision, in four parts.**
+
+**1. The desktop binding calls `deid-tr-core` and `deid-tr-files` directly, not `bindings/wasm`.**
+The wasm binding exists because a browser cannot link `ort` and cannot open a PDF off a disk.
+Neither limitation applies to a desktop process. Routing a native host through WebAssembly would
+cost the real file formats -- PDF and `.docx` handling lives in `deid-tr-files`, which the browser
+reaches only through a re-implementation -- and would put a second copy of the pipeline in the
+product for no gain. The consequence is stronger than the convenience: because the pipeline is
+native, the WEBVIEW NEVER SEES A DOCUMENT. A file is read, masked, verified and written entirely in
+Rust, and what crosses the IPC boundary is counts, labels and structural page names. That is I4
+applied to a GUI -- the rule that keeps a TCKN out of a log also keeps it out of a renderer's heap,
+its devtools, and any crash dump the OS takes of it.
+
+**2. `bindings/tauri` is a member of nothing.** Same reasoning as `bindings/python` and the held-out
+`ort` dependency. Tauri's graph is large; resolving it inside the workspace would write it into the
+ROOT `Cargo.lock`, which is the file `just core-no-socket` reads and the one `just test-airgapped`
+must resolve offline. Held out, the workspace lock never moves, `core/` is provably still
+socket-free, and a desktop build is opt-in. The crate carries its own committed lock file.
+
+**3. The file dialogs are opened from Rust, not from JavaScript.** `tauri-plugin-dialog` has a JS
+API; using it would mean granting `dialog:allow-open` and `dialog:allow-save` to the page, a
+capability the page then holds permanently. Calling the same plugin from Rust needs no capability at
+all, so `capabilities/default.json` grants `core:default` and nothing else, and
+`just tauri-no-network` fails the build on any addition to that list. It also means no command takes
+a path from the page: `redact_document` takes only a tier, and the file it reads is the one the user
+picked in the OS dialog a moment earlier. A page that could name a path is a page that could be made
+to read `~/.ssh/id_rsa`.
+
+**4. Mobile is configured and NOT built, and says so everywhere.** `tauri.conf.json` carries
+`bundle.iOS.minimumSystemVersion` and `bundle.android.minSdkVersion`; `tauri ios init` and
+`tauri android init` have never been run, no Xcode or Gradle project exists, no NDK toolchain has
+been proven, and nothing has run on a device or a simulator. The roadmap line for this binding says
+"desktop + iOS/Android", and the temptation was to produce a skeleton for all three and tick the
+line. D-029 and D-037 are both records of a number or a state that looked delivered and was not, and
+the cost each time was paid by whoever believed it. So the binding's README leads with a
+three-row table of what runs and what is only configured, `docs/TASKS.md` lists mobile as NOT
+STARTED, and no build recipe produces a mobile artifact. The configuration keys stay because they
+save the next person a guess; they are not evidence that anything works.
+
+**Why I1 needed a gate rather than a paragraph.** A desktop framework brings a large dependency
+graph and an ambient expectation of auto-update, crash reporting and telemetry. All three are
+network egress from a process that reads clinical documents, and all three arrive by default in most
+desktop stacks. `just tauri-no-network` therefore runs BEFORE `just build-tauri` and checks three
+independent things: the resolved graph carries no HTTP client and no TLS stack; `tauri.conf.json`
+enables no updater, names no remote origin and declares `default-src 'none'`; and the webview is
+granted `core:default` only. It was verified to FAIL by adding `shell:allow-execute` to the
+capability file, because a gate nobody has watched fail is a gate nobody knows works.
+
+`tokio` is the one name excluded from the socket ban, and the exclusion is argued rather than
+waived: `tauri` and `rfd` use it as an executor. `mio` remains banned and its absence from the
+resolved graph is the evidence, because tokio cannot open a socket without it.
+
+**Consequences.**
+- A contributor with no fetched Tauri graph, or a Linux machine with no `webkit2gtk-4.1`, gets a
+  loud skip from `just build-all` rather than a failed build -- the same asymmetry the wasm half
+  already has, for the same reason, and `just build-tauri` still hard-fails because it was asked
+  for on purpose.
+- `bundle.active` is `false`, so there is no installer for any platform. That is a real gap and it
+  is listed as one; the alternative was committing an unsigned bundler configuration that produces
+  artifacts nobody can distribute.
+- The desktop app has been built and run on macOS only. The Linux skip branch has never executed;
+  its detection command was exercised against an unresolvable manifest, which is not the same thing
+  and is not claimed to be.
+- The icon is generated by `scripts/make_tauri_icon.py` and regenerated on every build, so the one
+  binary file in the tree is reproducible rather than trusted. It deliberately shows one bar
+  UNREDACTED, which is this build's honest state.

@@ -1492,3 +1492,65 @@ theme: 38 of 38 pass WCAG AA, worst case 4.85:1 (`--ink-3` on `--surface-2`, dar
 **Next.** Hovering a span map ROW lights the mark but does not fill `#span-detail`; hovering the
 mark does both. Making the two symmetric means writing to an ARIA live region from a row hover,
 which is a behaviour change to an announced region and wants its own task.
+
+## 2026-07-20 — bindings/tauri: the desktop surface, built; mobile configured and not built
+
+**Changed.** `bindings/tauri/` now exists and is the one roadmap binding that did not. It is a
+Tauri v2 desktop application wrapping the pipeline through the native Rust crates -- not through
+`bindings/wasm` -- so it gets the real L1 rules and the real file formats.
+
+- `bindings/tauri/Cargo.toml` — held out of the workspace (`[workspace]` stanza), own committed
+  `Cargo.lock`, so the root lock and `just core-no-socket` are untouched. Reasoning in the manifest
+  and in D-041.
+- `src/pipeline.rs:1` — all of the behaviour, as plain functions over plain values: `Session` holds
+  one per-process salt, `deidentify_text`, `redact_file`, `layer_report`, `expert_tier_gate`.
+  Tested without a webview.
+- `src/l3.rs:1` — the Expert Determination gate. Reads `DEID_L3_MODEL` and `DEID_L3_RUNTIME`, the
+  same two variables the CLI reads, and builds a real `ContextualSweep` over `deid-tr-llm` when both
+  are present. Every refusal names the variable to set and ends "Nothing was masked."
+- `src/main.rs:1` — the window and five commands. Dialogs are opened from RUST, so the capability
+  file grants `core:default` and nothing else and no command takes a path from the page.
+- `ui/index.html`, `ui/app.css`, `ui/app.js` — no bundler, no npm, no framework. The
+  names-are-not-masked banner is in the main view above every result, hardcoded in HTML so a failed
+  IPC call cannot remove it.
+- `justfile` — new `build-tauri`, `test-tauri`, `tauri-no-network`; `build-all` now builds the
+  desktop app and SKIPS LOUDLY when the Tauri graph is not in the local cargo cache or, on Linux,
+  when `webkit2gtk-4.1` is missing.
+- `scripts/make_tauri_icon.py` — generates the single binary file in the tree, regenerated on every
+  build. Draws one bar unredacted, on purpose.
+- `docs/TASKS.md` — rewritten from "milestone M0" to M6, with the measured numbers.
+- `docs/DECISIONS.md` — D-041.
+
+**Verified, by running it.**
+- `just build-tauri` — builds offline (`cargo build --offline` resolves entirely from the local
+  registry cache; nothing was fetched).
+- `cargo test --manifest-path bindings/tauri/Cargo.toml` — 15 + 2 = **17 passed, 0 failed**,
+  including: a checksum-valid TCKN is removed; a name SURVIVES and the disclosure says so; the
+  serialised span map that crosses the IPC boundary does not contain the identifier; Expert
+  Determination refuses before a document is read; the layer report admits L2 is absent.
+- `cargo fmt --check` clean; `cargo clippy --all-targets -- -D warnings` clean. No `#[allow]` added.
+- `just tauri-no-network` — PASS, and proven to FAIL: adding `shell:allow-execute` to the capability
+  file made it exit 1 with the reason. The resolved desktop graph contains no `reqwest`, `hyper`,
+  `ureq`, `rustls`, `openssl`, `native-tls` or `mio`; only `tokio`, as an executor.
+- `just build-all` — full run, `skipped: nothing`, desktop binary in the built list.
+- The binary launches and holds a window (four consecutive launches, all alive after 5s).
+- `ui/` served over loopback and screenshotted: banner renders, all three panels render, and with
+  no `__TAURI__` bridge both buttons disable and the page says why.
+- `cargo test --workspace` — 34 test binaries, all green.
+- `python3 eval/run.py --detector pipeline` — the numbers now in `docs/TASKS.md`.
+
+**Broke.** Nothing. The root `Cargo.lock` is unchanged, `core/` gained no dependency, and no
+existing recipe changed behaviour except `build-all`, which gained one skippable step.
+
+**Not done, and named as not done.** iOS and Android are CONFIGURED AND NEVER BUILT — no
+`tauri ios init`, no `tauri android init`, no Xcode or Gradle project, nothing on a device or a
+simulator. No installer or app bundle for any platform (`bundle.active` is `false`). Built and run
+on macOS only; the Linux `webkit2gtk-4.1` skip branch has never executed. One observed quirk:
+an unbundled macOS binary relaunched within about a second of being killed sometimes exits
+immediately with status 0 — recorded in the binding's README because it looks like a broken build
+and is not.
+
+**Next.** Either (a) `tauri ios init` on a machine with Xcode, which is the first real test of the
+mobile claim and will surface the document-provider gap in the file flow, or (b) the icon set and
+signing work that turns `bundle.active` on. Neither moves a recall number: M3 is still the gap, and
+0.4269 critical recall does not change until a model exists.

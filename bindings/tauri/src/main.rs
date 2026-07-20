@@ -62,7 +62,9 @@ fn layer_report(session: State<'_, Session>) -> LayerReport {
 /// than a failed run.
 #[tauri::command]
 fn expert_tier_gate(session: State<'_, Session>) -> Result<(), String> {
-    session.expert_tier_gate().map_err(|error| error.to_string())
+    session
+        .expert_tier_gate()
+        .map_err(|error| error.to_string())
 }
 
 /// De-identify text the user typed or pasted.
@@ -163,9 +165,10 @@ fn openable() -> Vec<&'static str> {
 /// because the most expensive mistake available here is overwriting the
 /// original with the redacted copy and losing the ability to check the work.
 fn suggested_name(input: &std::path::Path) -> String {
-    let stem = input
-        .file_stem()
-        .map_or_else(|| "document".to_owned(), |s| s.to_string_lossy().into_owned());
+    let stem = input.file_stem().map_or_else(
+        || "document".to_owned(),
+        |s| s.to_string_lossy().into_owned(),
+    );
     match input.extension().and_then(|e| e.to_str()) {
         Some(extension) => format!("{stem}-deid.{extension}"),
         None => format!("{stem}-deid"),

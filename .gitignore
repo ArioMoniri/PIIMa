@@ -46,6 +46,20 @@ node_modules/
 dist/
 .parcel-cache/
 
+# The React panel's build output (bindings/panel-app/).
+#
+# Covered by `dist/` above, but named explicitly because that pattern is
+# unanchored and reads like it is about the release tarballs in the root dist/.
+# The rule is the same one bindings/wasm/pkg-web/ follows: a committed bundle is
+# a bundle nobody diffs, and this one is the artifact the no-upload and CSP
+# claims are checked against -- it has to be produced by the build being
+# audited, not pulled from a tree. Rebuilt by `just build-panel-app`.
+#
+# NOTE the asymmetry with bindings/wasm/panel/, which is committed in full and
+# has no build output at all. That is the point of keeping both surfaces.
+bindings/panel-app/dist/
+bindings/panel-app/node_modules/
+
 # Model weights - large, and fetched explicitly via `just pull`, never committed
 *.onnx
 *.safetensors

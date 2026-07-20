@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.94+-orange.svg)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-950%20rust%20%7C%20156%20python-brightgreen.svg)](#running-everything)
+[![Tests](https://img.shields.io/badge/tests-952%20rust%20%7C%20156%20python-brightgreen.svg)](#running-everything)
 [![Hooks](https://img.shields.io/badge/invariant%20guards-263%20cases-brightgreen.svg)](#the-invariants-and-the-hooks-that-mean-them)
 [![Gates](https://img.shields.io/badge/release%20gates-10%20pass%20%7C%2028%20fail-red.svg)](#the-benchmark)
 [![Status](https://img.shields.io/badge/status-pre--alpha-red.svg)](#-this-build-masks-no-names)

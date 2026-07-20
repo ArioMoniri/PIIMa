@@ -351,7 +351,11 @@ impl Session {
         let masked = masker.mask(text)?;
         Ok(TextOutcome {
             text: masked.text,
-            spans: masker.take_records().into_iter().map(SpanRow::from).collect(),
+            spans: masker
+                .take_records()
+                .into_iter()
+                .map(SpanRow::from)
+                .collect(),
             tier,
             disclosure: crate::disclosure(),
         })

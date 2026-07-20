@@ -8,7 +8,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { family, sigil } from "@/deid/policy";
-import { isMasked } from "@/deid/bars";
+
 import type { RedactionBar } from "@/deid/bars";
 import type { Segment, SpanSegment } from "@/deid/types";
 
@@ -68,7 +68,12 @@ export function SpanMap({
       </TableHeader>
       <TableBody>
         {spans.map((segment) => {
-          const masked = isMasked(segment);
+          // `segment.passthrough === null` rather than the `isMasked` type
+          // guard: `segment` is already known to be a `SpanSegment` here, so
+          // the guard narrows the false branch to `never` and the row that
+          // reports an unmasked span -- the important one -- stops type-
+          // checking. Same predicate, no narrowing.
+          const masked = segment.passthrough === null;
           const bar = bars.get(segment.index);
           return (
             <TableRow

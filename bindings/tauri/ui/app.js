@@ -10,9 +10,25 @@
 // file, and the CSP forbids all four. The only channel out of this window is
 // Tauri's IPC to the process that owns it.
 
-const invoke = window.__TAURI__.core.invoke;
-
 const el = (id) => document.getElementById(id);
+
+// THE BRIDGE IS CHECKED RATHER THAN ASSUMED. Outside the Tauri window --
+// somebody opening ui/index.html in a browser to look at the layout -- there is
+// no `__TAURI__`, and reading through it at module scope would throw before a
+// single line ran, leaving a page that looks like a working form and does
+// nothing when clicked. On a de-identification tool, a control that silently
+// does nothing is worse than one that is visibly broken: the user concludes the
+// document had nothing in it.
+const bridge = window.__TAURI__;
+const invoke = bridge
+  ? bridge.core.invoke
+  : () => {
+      throw new Error(
+        "This page is not running inside the deid-tr desktop application, so no " +
+          "de-identification is possible here. Nothing was masked. Run the built " +
+          "binary (see bindings/tauri/README.md) rather than opening this file.",
+      );
+    };
 
 /** Replace an element's children. */
 function replace(target, ...nodes) {
@@ -236,6 +252,17 @@ el("tier").addEventListener("change", () => {
   replace(el("file-report"));
 });
 
-await refreshAbout();
-await refreshTierGate();
-await refreshLayers();
+// The startup queries. A failure here is reported in the page rather than only
+// in a console nobody has open: whatever else is broken, the window must not
+// present itself as ready.
+try {
+  await refreshAbout();
+  await refreshTierGate();
+  await refreshLayers();
+} catch (error) {
+  setStatus(el("text-status"), String(error), "error");
+  setStatus(el("file-status"), String(error), "error");
+  replace(el("layers"), node("p", String(error), "empty"));
+  el("run-text").disabled = true;
+  el("run-file").disabled = true;
+}

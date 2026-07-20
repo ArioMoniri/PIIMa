@@ -18,7 +18,34 @@ fi
 mkdir -p "$hooks_dir"
 chmod +x "$source_hook"
 
+# ALREADY CORRECT IS A NO-OP, not a re-install.
+#
+# This used to back up and replace unconditionally, so every run of
+# scripts/server-setup.sh minted another timestamped backup of a hook that was
+# already right. Three runs, three identical backup symlinks. That is noise in
+# .git/hooks, and worse, it makes the honest question "has someone put something
+# custom here?" unanswerable, because the directory fills with our own copies.
+#
+# Two shapes count as current: a symlink resolving to the versioned script, and a
+# plain copy whose contents match it.
+already_current=0
+if [ -L "$target_hook" ]; then
+  linked="$(cd "$hooks_dir" && readlink "$target_hook" 2>/dev/null || true)"
+  case "$linked" in
+    */scripts/hooks/pre_commit_phi.sh) already_current=1 ;;
+  esac
+elif [ -f "$target_hook" ] && cmp -s "$source_hook" "$target_hook"; then
+  already_current=1
+fi
+
+if [ "$already_current" -eq 1 ]; then
+  printf 'install.sh: pre-commit hook already current, nothing to do\n'
+  exit 0
+fi
+
 if [ -e "$target_hook" ] || [ -L "$target_hook" ]; then
+  # Something else is here. Back it up rather than deleting it: a hook somebody
+  # else installed is theirs, and this script has no business discarding it.
   backup="${target_hook}.backup.$(date +%Y%m%d%H%M%S)"
   mv "$target_hook" "$backup"
   printf 'install.sh: existing pre-commit hook moved to %s\n' "$backup"

@@ -31,7 +31,9 @@ BAR = (24, 28, 33, 255)
 LEFT_IN = (192, 57, 43, 255)  # the bar that is NOT redacted
 
 
-def rounded(x: int, y: int, left: int, top: int, right: int, bottom: int, radius: int) -> bool:
+def rounded(
+    x: int, y: int, left: int, top: int, right: int, bottom: int, radius: int
+) -> bool:
     """True when (x, y) is inside a rounded rectangle."""
     if not (left <= x < right and top <= y < bottom):
         return False
@@ -41,8 +43,12 @@ def rounded(x: int, y: int, left: int, top: int, right: int, bottom: int, radius
         (left + radius, bottom - radius),
         (right - radius, bottom - radius),
     ):
-        inside_x = (x < left + radius) if corner_x == left + radius else (x >= right - radius)
-        inside_y = (y < top + radius) if corner_y == top + radius else (y >= bottom - radius)
+        inside_x = (
+            (x < left + radius) if corner_x == left + radius else (x >= right - radius)
+        )
+        inside_y = (
+            (y < top + radius) if corner_y == top + radius else (y >= bottom - radius)
+        )
         if inside_x and inside_y:
             return (x - corner_x) ** 2 + (y - corner_y) ** 2 <= radius * radius
     return True
@@ -88,7 +94,13 @@ def main() -> None:
         + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
         + chunk(b"IEND", b"")
     )
-    out = Path(__file__).resolve().parent.parent / "bindings" / "tauri" / "icons" / "icon.png"
+    out = (
+        Path(__file__).resolve().parent.parent
+        / "bindings"
+        / "tauri"
+        / "icons"
+        / "icon.png"
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(png)
     print(f"wrote {out} ({len(png)} bytes)")

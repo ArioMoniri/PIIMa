@@ -24,6 +24,17 @@
 PyYAML==6.0.3
 pytest==9.0.2
 
+# The type stubs for PyYAML. NOT optional and NOT a convenience: `just lint`
+# runs `mypy --strict eval/`, and eval/schema.py imports yaml. Without the stubs
+# that is a hard `import-untyped` error, so the gate does not run at all.
+#
+# This line is the first thing the venv caught. The gate had been passing on
+# whatever stubs happened to be installed system-wide on the developer's
+# machine, which is precisely the "different set every login" problem the venv
+# exists to remove -- the same `just lint` was a real type check on one box and
+# an error on the next, and nothing in the repository recorded which.
+types-PyYAML==6.0.12.20250915
+
 # Lint and type gates. They are dependencies, not conveniences: `just check`
 # runs both and a skipped gate is a gate.
 mypy==1.20.0

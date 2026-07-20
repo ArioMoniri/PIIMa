@@ -42,17 +42,68 @@ class NoStoreHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
-    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
-        """Log request lines to stderr, never to stdout.
+    # -----------------------------------------------------------------------
+    # Logging (I4)
+    #
+    # The stdlib's logger writes `self.requestline` verbatim -- method, FULL
+    # path including the query string, and protocol -- and its error path
+    # interpolates the raw request line into messages like
+    # `Bad request version ('...')`. Streamed to a terminal that was survivable.
+    # `just up` PERSISTS this output to logs/panel.log, and a file on a machine
+    # that processes clinical text is a different object from a scrollback
+    # buffer.
+    #
+    # Nothing in the panel's own operation puts document text in a URL: it masks
+    # in the browser and posts nothing, so every legitimate request is a GET for
+    # a static asset out of this repository. But "our UI would never send that"
+    # is a claim about a client, and the log is written by the server. So the
+    # rule below is the one bindings/service/src/http.rs already applies to
+    # deid-serve: the query string is discarded, and a path is only written down
+    # when it MATCHED something -- an unmatched request logs `<unmatched>` and
+    # the bytes it asked for are never recorded.
+    # -----------------------------------------------------------------------
 
-        The base class writes to stderr already; this override exists to state
-        that the format string is the stdlib's request line -- a method, a path
-        and a status. The panel is a GET-only static surface: no document text
-        is ever in a URL, because the page does its masking in the browser and
-        posts nothing. See docs/DEPLOY.md for what this means once `just up`
-        starts persisting these lines to a file (I4).
+    def _safe_path(self, code: int) -> str:
+        """The request path, or `<unmatched>` when it did not resolve."""
+        if not 200 <= code < 400:
+            return "<unmatched>"
+        path = self.path.split("?", 1)[0].split("#", 1)[0]
+        # A matched path is a filename from this repository's own tree, so it is
+        # a closed vocabulary in practice. The length cap is belt-and-braces
+        # against a matched-but-absurd path.
+        return path[:200]
+
+    def log_request(self, code: object = "-", size: object = "-") -> None:
+        status = code.value if hasattr(code, "value") else code
+        try:
+            status_int = int(status)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            status_int = 0
+        method = self.command if self.command in {"GET", "HEAD", "POST"} else "OTHER"
+        self.log_message(
+            "%s %s %s", method, self._safe_path(status_int), str(status_int)
+        )
+
+    def log_error(self, format: str, *args: object) -> None:
+        """Report that an error happened, never what was sent.
+
+        The base implementation interpolates attacker-supplied bytes -- a
+        malformed request version is echoed back into the message. The count is
+        the diagnostic; the payload is not.
         """
-        super().log_message(format, *args)
+        self.log_message("request rejected before routing")
+
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+        """Write one diagnostic line to stderr.
+
+        stderr, not stdout, so that redirecting one stream never captures the
+        other -- the same split `deid-serve` keeps.
+        """
+        sys.stderr.write(
+            "panel_server: %s - %s\n"
+            % (self.log_date_time_string(), format % args if args else format)
+        )
+        sys.stderr.flush()
 
 
 def main(argv: list[str] | None = None) -> int:

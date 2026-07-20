@@ -191,20 +191,14 @@ pub fn contextual(config: &Config) -> Result<Box<dyn Contextual>, Unavailable> {
     // guarantee and must not depend on a caller having checked first, while the
     // checks above are what turn its single classification into a message
     // naming the variable.
-    let local =
-        LocalGgufModel::new(runtime, model, CommandRunner).map_err(|error| {
-            Unavailable::NotBuildable {
-                reason: error.to_string(),
-            }
-        })?;
+    let local = LocalGgufModel::new(runtime, model, CommandRunner).map_err(|error| {
+        Unavailable::NotBuildable {
+            reason: error.to_string(),
+        }
+    })?;
     Ok(Box::new(ContextualSweep::new(
         local,
-        SweepConfig::deterministic(
-            model_id(model),
-            BACKEND,
-            quantization_of(model),
-            SWEEP_SEED,
-        ),
+        SweepConfig::deterministic(model_id(model), BACKEND, quantization_of(model), SWEEP_SEED),
     )))
 }
 

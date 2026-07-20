@@ -751,6 +751,91 @@ serve-panel: (_serve "panel/index.html")
 # Serve the minimal offline-proof page on 127.0.0.1.
 serve-offline-proof: (_serve "tests/index.html")
 
+# ---------------------------------------------------------------------------
+# The React panel: bindings/panel-app/.
+#
+# WHY THERE ARE TWO PANELS AND BOTH ARE KEPT. The vanilla panel's pitch is that
+# you can open six readable files and audit them with no build step. A bundled
+# React app cannot make that claim -- what ships is a hashed chunk nobody diffs
+# -- and for a tool whose entire argument is auditability that claim has real
+# value. The React app is the better product surface: a page-shaped document
+# view, a blackout animation that shows the operation happening, shadcn/ui
+# controls. The vanilla page is the minimal auditable proof. Neither replaces
+# the other, and a change that deletes one to avoid maintaining two has thrown
+# away the thing the other one was for.
+#
+# BOTH LOAD THE SAME WASM MODULE, from pkg-web/. That is what stops them from
+# drifting into two products: the pipeline is one artifact and only the surface
+# differs.
+# ---------------------------------------------------------------------------
+
+# Build the React panel to bindings/panel-app/dist/ and verify it against the CSP.
+build-panel-app:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "build-panel-app: npm is not installed." >&2
+        echo "  install Node 20 or newer (which ships npm), then re-run." >&2
+        echo "  NOT installed automatically: adding a toolchain is a network" >&2
+        echo "  operation, and this repository does not run those on someone's behalf." >&2
+        exit 1
+    fi
+    cd bindings/panel-app
+    # `npm ci` when there is a lockfile: a build that resolves a different
+    # dependency tree than the one that was reviewed is not the build that was
+    # reviewed, and on a page making a no-network claim the dependency tree is
+    # part of the claim.
+    if [ -f package-lock.json ]; then npm ci; else npm install; fi
+    npm run build
+    # NOT OPTIONAL, AND NOT A SEPARATE RECIPE SOMEONE HAS TO REMEMBER. Vite's
+    # defaults emit an inline <script> and data: URLs, both of which the panel's
+    # CSP refuses. The config switches them off; this asserts that it still
+    # does, against the bytes that were actually produced.
+    npm run check-csp
+    echo
+    echo "build-panel-app: bindings/panel-app/dist/"
+    du -sh dist | awk '{print "  total: " $1}'
+    find dist -type f -exec ls -l {} \; | awk '{printf "  %8d  %s\n", $5, $NF}' | sort -k2
+    echo
+    echo "This build masks NO NAMES: L2 has no trained model and no weights ship."
+
+# Serve the React panel on 127.0.0.1:8723.
+#
+# The wasm module is COPIED into dist/pkg-web/ rather than symlinked or served
+# from a second root: the app loads ./pkg-web/ relative to its own directory, so
+# the served tree has to contain it. A symlink would work here and break inside
+# an extracted release bundle, which is the worse place to find out.
+serve-panel-app: _venv build-panel-app
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -d bindings/wasm/pkg-web ]; then
+        echo "serve-panel-app: no web build; run 'just build-wasm' first." >&2
+        exit 1
+    fi
+    rm -rf bindings/panel-app/dist/pkg-web
+    mkdir -p bindings/panel-app/dist/pkg-web
+    cp bindings/wasm/pkg-web/* bindings/panel-app/dist/pkg-web/
+    echo "Ctrl-C to stop."
+    # scripts/panel_server.py, NOT an inline heredoc. That module is where I3
+    # lives structurally -- HOST is a constant with no flag that changes it -- and
+    # a third caller with its own copy of the bind address is a third place for it
+    # to drift to 0.0.0.0 while looking identical in `ps`. It also carries the I4
+    # request-logging rules, which a two-line SimpleHTTPRequestHandler would not.
+    {{python}} scripts/panel_server.py --port 8723 --directory bindings/panel-app/dist
+
+# Run the React panel's test suite (the blackout animation's three rules).
+test-panel-app:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "test-panel-app: npm is not installed (see 'just build-panel-app')." >&2
+        exit 1
+    fi
+    cd bindings/panel-app
+    if [ -f package-lock.json ]; then npm ci; else npm install; fi
+    npx tsc -b
+    npm test
+
 # The shared server for both pages above. Private: `just serve-panel` is the
 # entry point, and a bare page path is not one.
 #
@@ -780,6 +865,155 @@ _serve page: _venv
     # module, one host constant, both callers.
     exec "{{python}}" scripts/panel_server.py \
         --port 8722 --directory bindings/wasm --page "{{page}}"
+
+# ---------------------------------------------------------------------------
+# The desktop surface: bindings/tauri.
+# ---------------------------------------------------------------------------
+
+# WHY THE TAURI CRATE IS NOT A WORKSPACE MEMBER, restated here because this is
+# where somebody will wonder why every recipe below passes --manifest-path:
+# Tauri's graph is large and resolving it inside the workspace would put it in
+# the ROOT Cargo.lock, which `just core-no-socket` reads and which
+# `just test-airgapped` needs to resolve offline. Held out, the workspace lock
+# never moves and the desktop build is opt-in. Same reasoning as bindings/python
+# and the held-out `ort` dependency; the manifest records it too.
+
+# Build the desktop application (release).
+#
+# HARD-FAILS on a missing toolchain, unlike the build-all path below, and for
+# the reason this file applies everywhere: `just build-tauri` is a recipe
+# somebody ran on purpose, so telling them it cannot happen is the useful
+# answer. `build-all` skips instead, loudly.
+build-tauri: tauri-no-network
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # `python3`, not `{{python}}`: the icon generator imports only zlib and
+    # struct, so making it wait on the project virtualenv would add a dependency
+    # it does not have. Regenerated on every build so the committed PNG cannot
+    # drift from the script that claims to produce it.
+    python3 scripts/make_tauri_icon.py >/dev/null
+    cargo build --release --manifest-path bindings/tauri/Cargo.toml
+    binary="bindings/tauri/target/release/deid-tr-desktop"
+    if [ ! -x "${binary}" ]; then
+        echo "build-tauri: FAIL - cargo succeeded but ${binary} does not exist." >&2
+        echo "  The [[bin]] name in bindings/tauri/Cargo.toml has drifted from this recipe." >&2
+        exit 1
+    fi
+    echo "build-tauri: built ${binary}"
+    echo
+    echo "This desktop build masks NO NAMES: L2 has no trained model and no weights ship."
+    echo "Run it with: ${binary}"
+    echo "It is an unbundled executable. No .app, .dmg, .msi or .deb is produced - see"
+    echo "bindings/tauri/README.md, 'What is not built'."
+
+# Run the desktop binding's tests. They need no webview.
+test-tauri:
+    cargo test --manifest-path bindings/tauri/Cargo.toml
+
+# I1 for the desktop surface: prove the shipped app cannot reach a network.
+#
+# WHY THIS IS A GATE AND NOT A PARAGRAPH. A GUI framework brings a large
+# dependency graph and an ambient expectation of auto-update, crash reporting
+# and telemetry - all three are network egress from a process that reads
+# clinical documents, and all three arrive by default in most desktop stacks.
+# The claim "deid-tr desktop runs air-gapped" is only worth anything if
+# something checks it on every build, so this recipe runs BEFORE build-tauri
+# rather than after, and build-tauri depends on it.
+#
+# Three independent checks, because each one alone is escapable:
+#   1. the RESOLVED dependency graph carries no HTTP client and no TLS stack;
+#   2. tauri.conf.json enables no updater and names no remote origin;
+#   3. the capability file grants the webview nothing beyond core:default.
+tauri-no-network:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    manifest="bindings/tauri/Cargo.toml"
+    conf="bindings/tauri/tauri.conf.json"
+    caps="bindings/tauri/capabilities/default.json"
+    failed=0
+
+    # Kept in sync with core-no-socket's list, minus `tokio`: tauri and rfd use
+    # tokio as an executor and it appears in this graph with no net feature
+    # enabled. `mio` IS still banned and its absence is what shows tokio's
+    # networking is not compiled in - tokio cannot open a socket without it.
+    socket_crates='^(reqwest|ureq|hyper|hyper-util|h2|h3|tonic|isahc|curl|curl-sys|surf|attohttpc|awc|minreq|ehttp|http-req|async-std|smol|async-io|polling|tungstenite|tokio-tungstenite|quinn|socket2|mio|websocket|actix-web|axum|warp|rocket|tiny_http|trust-dns-resolver|hickory-resolver|native-tls|openssl|rustls|ureq-proto)$'
+
+    tree="$(cargo tree --manifest-path "${manifest}" --edges normal --prefix none --no-dedupe 2>/dev/null)" || {
+        echo "tauri-no-network: FAIL - the desktop dependency graph did not resolve, so it" >&2
+        echo "  could not be inspected. This check fails CLOSED: an uninspected graph is not" >&2
+        echo "  a clean one." >&2
+        exit 1
+    }
+    hits="$(echo "${tree}" | awk '{print $1}' | sort -u | grep -E "${socket_crates}" || true)"
+    if [ -n "${hits}" ]; then
+        echo "tauri-no-network: FAIL - the desktop app links a crate that can open a socket:" >&2
+        echo "${hits}" | sed 's/^/    /' >&2
+        echo "  I1 says PHI never leaves the device. A network client in this graph is not a" >&2
+        echo "  packaging detail; it is the invariant the product rests on. Revert it." >&2
+        failed=1
+    fi
+
+    # An auto-updater is a scheduled download from a remote origin, on a machine
+    # holding patient records. Not "configured to a safe URL" - absent.
+    if grep -qE '"(updater|createUpdaterArtifacts)"' "${conf}"; then
+        echo "tauri-no-network: FAIL - ${conf} mentions the updater." >&2
+        failed=1
+    fi
+    if grep -qE '"(devUrl|beforeDevCommand|beforeBuildCommand)"' "${conf}"; then
+        echo "tauri-no-network: FAIL - ${conf} names a dev server or a build hook. The window" >&2
+        echo "  must load only ./ui, which is compiled into the binary." >&2
+        failed=1
+    fi
+    # Every URL in the config, minus the two that are not origins the app talks
+    # to: the JSON-schema annotation an editor reads, and the loopback name the
+    # webview's own IPC transport uses.
+    remote="$(grep -oiE 'https?://[^"[:space:];]+' "${conf}" \
+        | grep -viE '^https://schema\.tauri\.app|^http://ipc\.localhost' || true)"
+    if [ -n "${remote}" ]; then
+        echo "tauri-no-network: FAIL - ${conf} names a remote origin:" >&2
+        echo "${remote}" | sed 's/^/    /' >&2
+        failed=1
+    fi
+    # The CSP is the second half of the same claim: a window that may not connect
+    # anywhere cannot exfiltrate what it renders.
+    if ! grep -q "default-src 'none'" "${conf}"; then
+        echo "tauri-no-network: FAIL - ${conf} has no default-src 'none' CSP." >&2
+        failed=1
+    fi
+
+    # Least privilege in the capability file. Any permission beyond core:default
+    # is a door the webview holds open, and each one has to be argued for here.
+    #
+    # `python3` and not `{{python}}`: this is an invariant gate and must run on a
+    # clone with no virtualenv built. It parses JSON and imports nothing outside
+    # the standard library, so the interpreter is all it needs.
+    granted="$(python3 - "${caps}" <<'PY'
+    import json, sys
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        print("\n".join(json.load(handle)["permissions"]))
+    PY
+    )" || granted=""
+    # FAILS CLOSED. An unreadable or empty permission list is an uninspected
+    # one, and an earlier revision of this recipe printed OK when the parse
+    # failed -- a gate that passes when it cannot run is not a gate.
+    if [ -z "${granted}" ]; then
+        echo "tauri-no-network: FAIL - could not read the permission list from ${caps}." >&2
+        echo "  Every capability file must grant at least core:default, so an empty result" >&2
+        echo "  means the file is missing, malformed, or python3 is not installed." >&2
+        failed=1
+    fi
+    for permission in ${granted}; do
+        if [ "${permission}" != "core:default" ]; then
+            echo "tauri-no-network: FAIL - ${caps} grants '${permission}'." >&2
+            echo "  Only core:default is allowed without an entry in docs/DECISIONS.md saying" >&2
+            echo "  which command needs it and why it cannot be done from Rust instead." >&2
+            failed=1
+        fi
+    done
+
+    if [ "${failed}" -ne 0 ]; then exit 1; fi
+    echo "tauri-no-network: OK - no HTTP client, no TLS stack, no updater, no remote origin,"
+    echo "  CSP default-src 'none', webview granted core:default only."
 
 # ---------------------------------------------------------------------------
 # Build and packaging: one command per artifact class, no shell history.
@@ -843,6 +1077,56 @@ build-all:
         built+=("bindings/wasm/panel/ (static; loads ../pkg-web/)")
     else
         skipped+=("wasm module + panel bundle: ${wasm_skip}")
+    fi
+
+    # The React panel. SKIPS LOUDLY when npm is absent, by the same rule the wasm
+    # half follows and for the same reason: `build-all` is the entry point for a
+    # contributor who wants the native binaries, and hard-failing here would make
+    # a Node toolchain a prerequisite for touching core/. Never skip SILENTLY --
+    # the skip prints the reason and the command that fixes it, and is listed
+    # again in the closing report.
+    #
+    # THE VANILLA PANEL IS NOT AFFECTED BY THIS SKIP. It has no build step, which
+    # is exactly why it still exists: a machine with no Node still gets a working,
+    # readable panel out of this repository.
+    if ! command -v npm >/dev/null 2>&1; then
+        skipped+=("React panel (bindings/panel-app/): npm is not installed (fix: install Node 20 or newer, then re-run; or run 'just build-panel-app' directly)")
+    else
+        echo
+        echo "build-all: React panel (bindings/panel-app/)"
+        just build-panel-app
+        built+=("bindings/panel-app/dist/ (React + Tailwind + shadcn/ui; loads ./pkg-web/)")
+    fi
+
+    # The desktop surface. SKIPS LOUDLY, by the same rule the wasm half follows
+    # and for the same reason: `just build-tauri` is a thing somebody asked for,
+    # so it fails; `build-all` is the entry point for a contributor who wants the
+    # native binaries, and hard-failing here would make a GUI toolchain a
+    # prerequisite for touching core/.
+    #
+    # Two gates, reported separately because they are fixed differently. The
+    # first is the one that bites on this project specifically: the Tauri graph
+    # is deliberately outside the workspace lock, so on a machine that has never
+    # fetched it there is nothing to build from and no way to get it without a
+    # network operation this repository will not perform on someone's behalf.
+    tauri_skip=""
+    if ! cargo metadata --offline --format-version 1 --manifest-path bindings/tauri/Cargo.toml \
+            >/dev/null 2>&1; then
+        tauri_skip="the Tauri dependency graph is not in this machine's cargo registry cache (fix, once, online: cargo fetch --manifest-path bindings/tauri/Cargo.toml)"
+    elif [ "$(uname -s)" = "Linux" ] && ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
+        # macOS has WebKit in the system and Windows has WebView2; only Linux
+        # needs a package installed, so only Linux is checked.
+        tauri_skip="the webkit2gtk-4.1 development package is not installed (fix: install libwebkit2gtk-4.1-dev, or your distribution's equivalent)"
+    fi
+    if [ -z "${tauri_skip}" ]; then
+        echo
+        echo "build-all: desktop application"
+        # Delegated rather than duplicated: build-tauri already encodes the
+        # air-gap gate it depends on and the icon regeneration.
+        just build-tauri
+        built+=("bindings/tauri/target/release/deid-tr-desktop")
+    else
+        skipped+=("desktop application (bindings/tauri): ${tauri_skip}")
     fi
 
     echo

@@ -122,25 +122,13 @@ export async function loadRuntime(): Promise<Runtime> {
     };
   }
 
-  // A SECOND, INDEPENDENT counter, with its baseline taken HERE -- after the
-  // last legitimate load -- so the number on screen is "requests this page made
-  // once it was running". The traps above cover the globals this file can name;
-  // the resource timeline counts what the browser actually fetched, including
-  // anything a future dependency reaches through a path nobody thought to stub.
-  // Two mechanisms disagreeing is itself the signal worth having.
-  if (globalThis.PerformanceObserver) {
-    new PerformanceObserver((list) => {
-      observedRequests += list.getEntries().length;
-      bumped();
-    }).observe({ type: "resource", buffered: false });
-  }
-
-  // The third instrument, and the one that reports the CSP rather than the
-  // page. A declarative load the CSP refuses never reaches the network and so
-  // never reaches the resource timeline either -- it is invisible to both
-  // mechanisms above. That is a control WORKING, but it is still the page
-  // trying something it should not, and a reader deserves to be told which of
-  // the two happened rather than inferring it from a silence.
+  // Armed EARLY, unlike the resource observer below. A declarative load the CSP
+  // refuses never reaches the network and so never reaches the resource
+  // timeline either -- it is invisible to the other two mechanisms. That is a
+  // control WORKING, but it is still the page trying something it should not,
+  // and a reader deserves to be told which of the two happened rather than
+  // inferring it from a silence. A violation during the module load is a real
+  // finding, so this listener has to exist before the load.
   addEventListener("securitypolicyviolation", (event) => {
     blocked.push(event.effectiveDirective || event.violatedDirective);
     bumped();
@@ -149,10 +137,33 @@ export async function loadRuntime(): Promise<Runtime> {
   // `@vite-ignore` keeps Rollup from resolving this at build time; see the
   // header. It MUST be the async initialiser, not `initSync`: browsers refuse a
   // synchronous `WebAssembly.Module` larger than 4KB on the main thread and this
-  // module is ~880KB, so `initSync` throws a RangeError regardless of arguments.
+  // module is over a megabyte, so `initSync` throws a RangeError regardless of
+  // how correct its arguments are.
   const glueUrl = new URL("./pkg-web/deid_tr_wasm.js", document.baseURI).href;
   const wasm = (await import(/* @vite-ignore */ glueUrl)) as WasmModule;
   await wasm.default({ module_or_path: wasmBytes });
+
+  // A SECOND, INDEPENDENT counter, INSTALLED HERE AND NOT EARLIER.
+  //
+  // The baseline has to be the moment the module has finished loading, because
+  // that is what the number on screen claims to be: "requests this page made
+  // once it was running". An earlier revision installed this before the glue
+  // import above, so the observer counted `deid_tr_wasm.js` -- the module's own
+  // second file -- and the panel opened reporting "Something reached for the
+  // network. 1 resource". A no-network claim that cries wolf on its own load is
+  // worse than no claim: the first thing anyone learns is that the counter is
+  // noise, and then it is not read on the day it means something.
+  //
+  // The traps above cover the globals this file can name; the resource timeline
+  // counts what the browser actually fetched, including anything a future
+  // dependency reaches through a path nobody thought to stub. Two mechanisms
+  // disagreeing is itself the signal worth having.
+  if (globalThis.PerformanceObserver) {
+    new PerformanceObserver((list) => {
+      observedRequests += list.getEntries().length;
+      bumped();
+    }).observe({ type: "resource", buffered: false });
+  }
 
   // THE SIZE IS MEASURED, NEVER ASSERTED. `wasmBytes` is the buffer this tab
   // actually fetched. A hand-written number in the markup would have been
