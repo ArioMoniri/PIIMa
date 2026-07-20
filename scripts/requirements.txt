@@ -1,0 +1,30 @@
+# Python dependencies for the eval harness, the red team, the schema tooling and
+# the lint/type gates.
+#
+# WHY THIS FILE IS PINNED EXACTLY:
+# on a shared server `python3` is whatever the last person installed and
+# site-packages is whatever the last person pip-installed --user. The eval
+# harness IS the test suite for model behaviour, so "the numbers moved" must
+# never have "a different pytest resolved a different fixture order" as a
+# candidate explanation. An exact pin plus a private .venv makes the interpreter
+# and its libraries part of the checkout rather than part of the login.
+#
+# WHY THE SET IS THIS SMALL: eval/, tests/ and scripts/ import only the stdlib
+# plus PyYAML. `transformers` and `tokenizers` are deliberately ABSENT -- they
+# are imported lazily by scripts/gate_tokenizer.py and
+# scripts/baseline_incumbent.py, which are publish-time tools that reach the
+# network. Putting them here would install a model downloader into the same
+# environment `just test-airgapped` runs in, which is exactly the coupling I1
+# exists to prevent. Those two tools tell you the install command when you run
+# them on purpose.
+#
+# Raising a pin is a normal commit. It is also the moment to re-run `just eval`
+# and confirm the numbers did not move.
+
+PyYAML==6.0.3
+pytest==9.0.2
+
+# Lint and type gates. They are dependencies, not conveniences: `just check`
+# runs both and a skipped gate is a gate.
+mypy==1.20.0
+ruff==0.15.8

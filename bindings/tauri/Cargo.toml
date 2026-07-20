@@ -1,0 +1,58 @@
+[package]
+name = "deid-tr-tauri"
+description = "deid-tr desktop application: the native pipeline behind a local webview, no network."
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/ArioMoniri/PIIMa"
+
+# THIS CRATE IS A MEMBER OF NOTHING, for the same reason `bindings/python` and
+# the `ort` dependency are held out (see the root Cargo.toml and
+# bindings/ort/Cargo.toml).
+#
+# Tauri's dependency graph is large and it necessarily contains an HTTP client:
+# `tauri-build`'s bundler machinery and the webview stack pull `ureq`/`reqwest`
+# transitively. Listing this crate as a workspace member would put those crates
+# in the ROOT Cargo.lock, where `just core-no-socket` reads the resolved graph
+# and where every `cargo build`/`clippy`/`test` in the workspace would have to
+# resolve them -- turning the air-gapped build into a gamble on a registry
+# cache. Held out, the workspace lock is unchanged, `core/` is provably still
+# socket-free, and this crate resolves against its OWN lock file only when
+# somebody asks for a desktop build.
+#
+# The isolation is not a workaround for the invariant, it is how the invariant
+# survives a GUI: nothing in this manifest gives the DEID PIPELINE a network
+# path. `deid-tr-core` still has no network dependency, `deid-tr-files` still
+# does no I/O of its own, and the only crates below that can open a socket are
+# the webview host's, which this application never asks to fetch anything (see
+# tauri.conf.json's CSP and capabilities/default.json).
+[workspace]
+
+[lib]
+# The library half exists so the commands are unit-testable WITHOUT a webview.
+# A desktop binding whose logic is only reachable by launching a window is a
+# desktop binding with no tests, which is precisely the failure mode D-029 and
+# D-037 record.
+name = "deid_tr_tauri"
+path = "src/lib.rs"
+
+[[bin]]
+name = "deid-tr-desktop"
+path = "src/main.rs"
+
+[dependencies]
+deid-tr-core = { path = "../../core" }
+deid-tr-files = { path = "../files" }
+# L3 is WIRED, not stubbed: the same local-process GGUF runner the CLI uses.
+# This crate cannot fetch weights -- see bindings/llm/Cargo.toml for why that is
+# structural rather than a policy.
+deid-tr-llm = { path = "../llm" }
+getrandom = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+thiserror = "2"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

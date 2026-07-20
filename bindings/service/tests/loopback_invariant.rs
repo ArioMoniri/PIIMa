@@ -33,7 +33,11 @@ use deid_tr_service::log::Log;
 use deid_tr_service::server::{bind_listener, Server};
 
 fn good_token() -> String {
-    "s".repeat(MIN_TOKEN_LEN)
+    // Cycles the alphabet: clears the length floor AND the distinct-character
+    // floor that the bind gate now enforces alongside it.
+    (0..MIN_TOKEN_LEN)
+        .map(|index| char::from(b'a' + u8::try_from(index % 26).unwrap_or(0)))
+        .collect()
 }
 
 /// The IPv4 all-interfaces address, assembled at run time.

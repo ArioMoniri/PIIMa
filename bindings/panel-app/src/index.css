@@ -1,0 +1,272 @@
+@import "tailwindcss";
+
+/* Class-based dark mode rather than a media query, because the panel has an
+   explicit theme button: a clinician on a shared workstation should be able to
+   pick, and the OS setting on a ward machine is whatever the last person left
+   it as. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ==========================================================================
+   PALETTE. WCAG AA IN BOTH THEMES, and the ratios are recorded next to the
+   values so a later "let's soften that grey" is a change someone has to make
+   against a number rather than against a feeling.
+
+   Every pair below is body-text contrast (>= 4.5:1); the large-text allowance
+   of 3:1 is deliberately not used anywhere, because the text that matters most
+   on this page -- the not-masked disclosure -- is not large.
+   ========================================================================== */
+@theme {
+  --color-background: #ffffff;
+  --color-foreground: #18181b; /* 16.9:1 on background */
+  --color-card: #ffffff;
+  --color-card-foreground: #18181b;
+  --color-muted: #f4f4f5;
+  --color-muted-foreground: #52525b; /* 8.0:1 on background */
+  --color-border: #d4d4d8;
+  --color-input: #d4d4d8;
+  --color-primary: #1d4ed8; /* 7.0:1 on background */
+  --color-primary-foreground: #ffffff; /* 7.0:1 on primary */
+  --color-secondary: #f4f4f5;
+  --color-secondary-foreground: #27272a;
+  --color-accent: #f4f4f5;
+  --color-accent-foreground: #18181b;
+  --color-danger: #b91c1c; /* 6.0:1 on background */
+  --color-danger-foreground: #ffffff; /* 6.0:1 on danger */
+  --color-ring: #1d4ed8;
+
+  /* Entity families. HUE IS THE THIRD CHANNEL, NEVER THE ONLY ONE -- see
+     .fam-* below for the underline treatments and policy.ts for the sigils. */
+  --color-fam-id: #7c3aed;
+  --color-fam-contact: #0e7490;
+  --color-fam-date: #a16207;
+  --color-fam-place: #15803d;
+  --color-fam-name: #be123c;
+  --color-fam-other: #52525b;
+}
+
+.dark {
+  --color-background: #09090b;
+  --color-foreground: #fafafa; /* 18.9:1 on background */
+  --color-card: #131316;
+  --color-card-foreground: #fafafa;
+  --color-muted: #1f1f23;
+  --color-muted-foreground: #a1a1aa; /* 9.3:1 on background */
+  --color-border: #34343a;
+  --color-input: #34343a;
+  --color-primary: #93c5fd; /* 11.2:1 on background */
+  --color-primary-foreground: #09090b; /* 11.2:1 on primary */
+  --color-secondary: #27272a;
+  --color-secondary-foreground: #fafafa;
+  --color-accent: #27272a;
+  --color-accent-foreground: #fafafa;
+  --color-danger: #fca5a5; /* 9.6:1 on background */
+  --color-danger-foreground: #450a0a; /* 8.1:1 on danger */
+  --color-ring: #93c5fd;
+
+  --color-fam-id: #c4b5fd;
+  --color-fam-contact: #67e8f9;
+  --color-fam-date: #fcd34d;
+  --color-fam-place: #86efac;
+  --color-fam-name: #fda4af;
+  --color-fam-other: #d4d4d8;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    /* SYSTEM STACK, NO WEBFONT. `font-src 'none'` in the CSP means a remote
+       font would be blocked rather than merely slow, and a self-hosted one is
+       another 100KB of bytes to audit for a page whose pitch is that you can
+       audit it. */
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* THE FOCUS RING IS NOT OPTIONAL AND IS NOT ALLOWED TO BE INVISIBLE. Every
+     interactive element in this app is reachable by keyboard, and a de-id tool
+     that can only be driven with a mouse excludes the screen-reader users most
+     likely to be checking whether it told the truth. */
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+}
+
+/* ==========================================================================
+   THE DOCUMENT PAGE
+   ========================================================================== */
+
+.doc-page {
+  /* A4-ish proportion. A READING AID, NOT A FACSIMILE: this is extracted text,
+     and the view says so in words on every page. See deid/pages.ts. */
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* A detected span, masked or not. `position: relative` is what the bar is
+   absolutely positioned against. */
+.mark {
+  position: relative;
+  display: inline-grid;
+  border-radius: 2px;
+}
+
+/* Both texts share ONE grid cell, so the box is as wide as the wider of the
+   two and NOTHING REFLOWS when the surrogate replaces the original mid-sweep.
+   A note that jumps under the reader at the exact moment a bar resolves is a
+   note whose redaction you cannot actually watch.
+
+   This does mean the box carries the original's width. That is fine HERE and
+   would not be fine in the export: this is the user's own document, shown back
+   to them, where the original length is on screen anyway. `policy.ts` is where
+   length must not survive, and its `redact` method draws a fixed-width block
+   for exactly that reason. */
+.mark-stack {
+  display: grid;
+  grid-template-areas: "t";
+}
+.mark-before,
+.mark-after {
+  grid-area: t;
+}
+.mark-before {
+  /* Hidden but still occupying its cell. `visibility` rather than `display`,
+     because a display:none child contributes no width and the box would snap. */
+  visibility: hidden;
+}
+
+/* Entity family coding. THREE CHANNELS, ANY ONE SUFFICIENT: the two-letter
+   sigil (policy.ts), the underline treatment below, and the hue. About one man
+   in twelve has some colour vision deficiency, and a masking tool whose entity
+   coding is hue-only fails them silently -- they see marks, cannot tell an
+   identifier number from a date, and have no way to know they are missing
+   anything. */
+.fam-id { text-decoration: underline solid 2px; text-decoration-color: var(--color-fam-id); }
+.fam-contact { text-decoration: underline dotted 2px; text-decoration-color: var(--color-fam-contact); }
+.fam-date { text-decoration: underline dashed 2px; text-decoration-color: var(--color-fam-date); }
+.fam-place { text-decoration: underline double 3px; text-decoration-color: var(--color-fam-place); }
+.fam-name { text-decoration: underline wavy 2px; text-decoration-color: var(--color-fam-name); }
+.fam-other { text-decoration: underline solid 1px; text-decoration-color: var(--color-fam-other); }
+.mark { text-underline-offset: 3px; }
+
+/* A span the pipeline detected and did NOT mask. Dashed outline, no fill, and
+   -- structurally -- no bar element anywhere inside it. See components/
+   KeptSpanView.tsx and deid/bars.ts. */
+.mark-kept {
+  outline: 1px dashed var(--color-muted-foreground);
+  outline-offset: 1px;
+  opacity: 0.95;
+}
+
+/* ==========================================================================
+   THE BLACKOUT BAR
+
+   One keyframe set, three phases, driven entirely by the compositor. The
+   percentages are BAR_TOTAL_MS = 560ms split as 200 cover / 120 hold / 240
+   reveal; deid/bars.ts owns those constants and this file mirrors them. If
+   they diverge, the swap becomes visible from under the bar -- which is the
+   failure that looks like the animation is fine and the numbers are wrong.
+
+     0%      -> 35.7%   the bar sweeps in from the left  (cover)
+     35.7%   -> 57.1%   the bar sits opaque              (hold)
+     45%                the text underneath is swapped, unseen
+     57.1%   -> 100%    the bar wipes off to the right   (reveal)
+
+   THE REVEAL IS THE HONEST PART. A bar that stayed opaque would say "this was
+   painted over" -- which is what a flattened PDF does, and in a flattened PDF
+   the text is still in the file underneath. What happened here is that the text
+   was REMOVED from the string and a surrogate put in its place. The wipe is the
+   frame that distinguishes those two operations, and it is the reason this
+   animation is allowed to exist at all.
+   ========================================================================== */
+.bar {
+  position: absolute;
+  inset: -1px -2px;
+  border-radius: 2px;
+  background: var(--color-foreground);
+  clip-path: inset(0 100% 0 0);
+  pointer-events: none;
+}
+
+.sweeping .bar {
+  animation: bar-sweep 560ms linear var(--bar-delay, 0ms) both;
+}
+.sweeping .mark-before {
+  visibility: visible;
+  animation: text-out 560ms step-end var(--bar-delay, 0ms) both;
+}
+.sweeping .mark-after {
+  animation: text-in 560ms step-end var(--bar-delay, 0ms) both;
+}
+.sweeping .row-sync {
+  animation: row-sync 560ms ease-out var(--bar-delay, 0ms) both;
+}
+
+@keyframes bar-sweep {
+  0% { clip-path: inset(0 100% 0 0); }
+  35.7% { clip-path: inset(0 0 0 0); }
+  57.1% { clip-path: inset(0 0 0 0); }
+  100% { clip-path: inset(0 0 0 100%); }
+}
+
+/* step-end: an abrupt swap, not a crossfade. Both texts are under an opaque
+   bar at 45%, so a crossfade would be invisible anyway -- and a swap that is
+   invisible is the point. Seeing the original dissolve into the surrogate
+   would suggest one turned into the other; it did not, it was replaced. */
+@keyframes text-out {
+  0% { visibility: visible; opacity: 1; }
+  45% { visibility: hidden; opacity: 0; }
+  100% { visibility: hidden; opacity: 0; }
+}
+@keyframes text-in {
+  0% { opacity: 0; }
+  45% { opacity: 1; }
+  100% { opacity: 1; }
+}
+
+/* The span map row lights up on ITS OWN bar's delay, not on a shared one, so
+   the eye can follow a row and its bar as one event rather than noticing that
+   the table flickered at roughly the same time as the page. */
+@keyframes row-sync {
+  0% { background-color: transparent; }
+  35.7% { background-color: color-mix(in srgb, var(--color-primary) 22%, transparent); }
+  57.1% { background-color: color-mix(in srgb, var(--color-primary) 22%, transparent); }
+  100% { background-color: transparent; }
+}
+
+/* ==========================================================================
+   RULE 3, AT THE STYLESHEET LEVEL.
+
+   `useBlackout` already refuses to start a sweep under `reduce`, so this block
+   should never have anything to do. It is here because that is a JavaScript
+   decision and this is a CSS one, and the two fail independently: a future
+   component that forgets to consult the hook still gets no motion. The final
+   state is what remains, which is what the rule asks for -- not "a shorter
+   animation", not "a fade instead". None of this touches the exported bytes,
+   which are composed before any of it is reachable.
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .sweeping .bar,
+  .sweeping .mark-before,
+  .sweeping .mark-after,
+  .sweeping .row-sync {
+    animation: none;
+  }
+  .sweeping .bar {
+    clip-path: inset(0 0 0 100%);
+  }
+  .sweeping .mark-before {
+    visibility: hidden;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}

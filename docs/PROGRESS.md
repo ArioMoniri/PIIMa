@@ -1435,3 +1435,60 @@ Token-2026ab` passes every check with perhaps twenty bits of entropy). This is d
 function and asserted in a test so the limitation is visible rather than implied away, but the real
 fix is generating the token for the operator rather than judging theirs — which is a decision about
 whether this binary should ever write a credential to disk, and it is not made yet.
+
+## 2026-07-20 - Panel craft pass: one radius scale, a real type hierarchy, tabular span-map figures
+
+**Changed.** A visual pass over `bindings/wasm/panel/` only. No load sequence, no disclosure text
+and no behaviour was touched.
+
+`panel.css` had five radii in circulation (8, 5, 3, 2, 999px) with no rule choosing between them.
+Replaced with three tokens chosen by ROLE: `--radius-control` (3px, anything you click, type into
+or focus), `--radius-surface` (6px, anything that groups) and `--radius-pill` (999px, only
+genuinely capsule things). One opt-out remains and is commented: `button.sort` is square because it
+fills its header cell edge to edge.
+
+Type hierarchy. The scale existed and was barely used: h1 32px, h2 21px, and then almost every
+other string on the page at the same 13px step. Now four ranks, each separated by more than size:
+h1 26/700 mono, h2 17/600, an eyebrow rank at 12px uppercase `--ink-3` that `h3` and every `th`
+share, body at 15/13, and `.hint` at 12px `--ink-3`. `.file-refusal h3` and `#images-warning h3`
+opt out of the uppercase eyebrow because they are sentences a person reads.
+
+Span map. `render.js:cell()` now takes a class string rather than a `mono` boolean, and both offset
+columns plus confidence carry `num`: `font-variant-numeric: tabular-nums` and right alignment, so
+`55..66` and `222..232` share a right edge and their digits sit in the same tracks. The same
+treatment is applied to the file span map and the per-part table in `panel.js`. `tbody
+th[scope="row"]` opts out of the eyebrow so part names quoted from the document are not uppercased.
+
+Hairline discipline. The stylesheet now has exactly two border weights: 1px for every divider and
+container edge (24 uses) and 3px for the emphasis rail (12 uses), and two colours with a stated
+split, `--line` for dividers and `--line-strong` for edges you can put a cursor inside. The banner's
+4px rail, the tier explanation's 4px rail and the refusal's 2px box all came down to the one rail
+weight. The legend swatches lost their per-family `border-bottom` and now use `text-decoration`,
+the same property the marks use: the places swatch had said `double` where the mark is `wavy`, and
+`2px double` cannot render two lines at that width so it came out solid and collided with the
+identifier swatch. A key that disagrees with the thing it is a key for was the actual bug.
+
+Linkage. Hovering a span map row or a mark still lights both; the row now says so with the same 3px
+inset rail rather than an `outline`, which engines draw inconsistently on a `tr`. Transition is
+90ms, inside the existing `prefers-reduced-motion: no-preference` block. The MARK is deliberately
+not transitioned: it must appear instantly and must never resemble the sweep.
+
+Empty, loading and error states are composed rather than defaulted: `.empty` is a two-rank
+placeholder on its own surface, `.boot` carries the accent rail, `.error` the 1px box plus rail.
+
+Two em-dashes in a `panel.js` comment are gone. The panel now has zero.
+
+**Broke.** Nothing. `just test` 156 Python + all Rust green, `cargo clippy --all-targets -D
+warnings` clean, `just test-wasm` PASS (nothing is uploaded, 0 networking calls). `just lint` fails
+on a pre-existing missing `types-PyYAML` stub in `eval/schema.py`, untouched by this change.
+
+**Verified in a browser** at 1280x800 and 375x812, light and dark. The names-are-not-masked banner
+bottom sits at 663px of 812 on the phone viewport, so it is still fully visible without scrolling
+and 22px better placed than before. No horizontal body overflow at 375px. Sweep, reduced-motion
+gate, the `run-status` live region, keyboard access and the network counter all unchanged and
+working. Contrast measured rather than eyeballed across 19 foreground/background pairings per
+theme: 38 of 38 pass WCAG AA, worst case 4.85:1 (`--ink-3` on `--surface-2`, dark).
+
+**Next.** Hovering a span map ROW lights the mark but does not fill `#span-detail`; hovering the
+mark does both. Making the two symmetric means writing to an ARIA live region from a row hover,
+which is a behaviour change to an announced region and wants its own task.

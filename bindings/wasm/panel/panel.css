@@ -268,6 +268,7 @@ code,
 
 .skip {
   background: var(--accent);
+  border-radius: var(--radius-control);
   color: var(--accent-ink);
   left: var(--space-2);
   padding: var(--space-2) var(--space-3);
@@ -1021,30 +1022,56 @@ td .sigil.fam-other {
   padding: 0.1em 0.3em;
 }
 
+/*
+ * THE SWATCH IS DRAWN THE WAY THE MARK IS DRAWN, with the same property.
+ *
+ * These used a `border-bottom` whose style was chosen per family, which broke
+ * the key twice over. It disagreed with the marks (places are WAVY in the note
+ * and the swatch said `double`), and `2px double` cannot render as two lines at
+ * that width, so it came out solid and collided with the identifier swatch,
+ * which is solid on purpose. A key that shows a different treatment from the
+ * thing it is a key for is worse than no key.
+ *
+ * Using `text-decoration` instead means the swatch inherits the ONLY definition
+ * of each family's underline, and a border weight that was not a hairline and
+ * not a rail leaves the stylesheet.
+ */
+.legend-swatch {
+  text-decoration-color: currentColor;
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
 .legend .fam-id .legend-swatch {
   background: var(--ent-id-bg);
   color: var(--ent-id);
-  border-bottom: 2px solid var(--ent-id);
+  text-decoration-style: solid;
 }
 .legend .fam-contact .legend-swatch {
   background: var(--ent-contact-bg);
   color: var(--ent-contact);
-  border-bottom: 2px dotted var(--ent-contact);
+  text-decoration-style: dotted;
 }
 .legend .fam-date .legend-swatch {
   background: var(--ent-date-bg);
   color: var(--ent-date);
-  border-bottom: 2px dashed var(--ent-date);
+  text-decoration-style: dashed;
 }
 .legend .fam-place .legend-swatch {
   background: var(--ent-place-bg);
   color: var(--ent-place);
-  border-bottom: 2px double var(--ent-place);
+  text-decoration-style: wavy;
 }
 .legend .fam-name .legend-swatch {
   background: var(--ent-name-bg);
   color: var(--ent-name);
-  border-bottom: 3px double var(--ent-name);
+  text-decoration-style: double;
+}
+.legend .fam-other .legend-swatch {
+  text-decoration-line: overline underline;
+  text-decoration-style: solid;
+  text-decoration-thickness: 1px;
 }
 .legend .fam-other .legend-swatch {
   background: var(--ent-other-bg);
@@ -1054,6 +1081,7 @@ td .sigil.fam-other {
   background: transparent;
   border-style: dashed;
   color: var(--danger);
+  text-decoration-line: none;
 }
 
 /* --- span and row linkage ----------------------------------------------- */

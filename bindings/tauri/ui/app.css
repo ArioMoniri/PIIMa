@@ -1,0 +1,290 @@
+/*
+ * A separate same-origin stylesheet rather than an inline <style>, so that
+ * `style-src 'self'` can be enforced without 'unsafe-inline'. System fonts
+ * only: a web font is a network request, and this application must run on a
+ * machine with no network at all.
+ */
+
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #14171a;
+  --muted: #5a6570;
+  --line: #d6dbe0;
+  --panel: #f6f8fa;
+  --bad-bg: #fdf0ef;
+  --bad-line: #c0392b;
+  --ok: #1c6b3f;
+  --accent: #14568c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171a;
+    --fg: #e7ebee;
+    --muted: #9aa5af;
+    --line: #333b42;
+    --panel: #1c2126;
+    --bad-bg: #2c1a19;
+    --bad-line: #e06055;
+    --ok: #63c48d;
+    --accent: #7fb3e3;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0 1.25rem 3rem;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+}
+.skip:focus {
+  position: static;
+  display: inline-block;
+  padding: 0.5rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 1rem 0 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  letter-spacing: 0.01em;
+}
+
+h2 {
+  margin: 0 0 0.4rem;
+  font-size: 1.02rem;
+}
+
+.sub,
+.hint {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.tier label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.tier select {
+  min-width: 20rem;
+  max-width: 100%;
+  padding: 0.35rem;
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.tier-note {
+  margin: 0.3rem 0 0;
+  max-width: 34rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* The banner is not styled to be dismissible, collapsible or subtle. */
+.banner {
+  margin: 1rem 0 1.25rem;
+  padding: 0.9rem 1.1rem;
+  background: var(--bad-bg);
+  border: 2px solid var(--bad-line);
+  border-radius: 6px;
+}
+
+.banner h2 {
+  margin-top: 0;
+}
+
+.banner ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.banner li {
+  margin: 0.3rem 0;
+}
+
+.banner li.bad strong {
+  color: var(--bad-line);
+}
+
+.disclosure {
+  margin: 0.8rem 0 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--bad-line);
+  color: var(--fg);
+}
+
+main {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.panel {
+  padding: 1rem 1.1rem 1.2rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+textarea {
+  width: 100%;
+  margin-top: 0.6rem;
+  padding: 0.6rem;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88rem;
+  resize: vertical;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.7rem;
+}
+
+button {
+  padding: 0.45rem 0.9rem;
+  background: var(--accent);
+  color: #ffffff;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.status {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.status.error {
+  color: var(--bad-line);
+  font-weight: 600;
+}
+
+.status.ok {
+  color: var(--ok);
+}
+
+table {
+  width: 100%;
+  margin-top: 0.8rem;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+th,
+td {
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.empty {
+  margin-top: 0.8rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.layer {
+  display: flex;
+  gap: 0.7rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.layer:last-child {
+  border-bottom: none;
+}
+
+.flag {
+  flex: none;
+  width: 5.5rem;
+  font-weight: 700;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.flag.live {
+  color: var(--ok);
+}
+
+.flag.dead {
+  color: var(--bad-line);
+}
+
+.layer-name {
+  font-weight: 600;
+}
+
+.layer-detail {
+  margin: 0.1rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.warn {
+  margin-top: 0.8rem;
+  padding: 0.7rem 0.9rem;
+  background: var(--bad-bg);
+  border: 2px solid var(--bad-line);
+  border-radius: 5px;
+  font-size: 0.87rem;
+}

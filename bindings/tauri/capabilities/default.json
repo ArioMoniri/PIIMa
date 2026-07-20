@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The smallest permission set that lets the window run our own commands. Nothing in it can reach a network, a file, a shell or a clipboard.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "deid-tr",
+  "version": "0.1.0",
+  "identifier": "org.deidtr.desktop",
+  "build": {
+    "frontendDist": "./ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "deid-tr - Turkish clinical de-identification (masks NO names)",
+        "width": 1120,
+        "height": 860,
+        "minWidth": 720,
+        "minHeight": 560,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self'; font-src 'self'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'",
+      "dangerousDisableAssetCspModification": false,
+      "assetProtocol": {
+        "enable": false,
+        "scope": []
+      },
+      "freezePrototype": true
+    },
+    "trayIcon": null
+  },
+  "bundle": {
+    "active": false,
+    "targets": [],
+    "iOS": {
+      "minimumSystemVersion": "13.0"
+    },
+    "android": {
+      "minSdkVersion": 24
+    }
+  },
+  "plugins": {}
+}

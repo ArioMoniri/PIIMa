@@ -67,6 +67,18 @@ eval/results/latest.json
 # Agent tooling scratch
 .claude-flow/
 
+# Detached-surface runtime state, written by scripts/surfaces.sh.
+#
+# logs/ holds the stdout+stderr of deid-serve and the panel server, which is the
+# first place this project PERSISTS output rather than streaming it to a
+# terminal. deid-serve's logger structurally cannot carry document text (I4 -
+# see bindings/service/src/log.rs and the audit in docs/DEPLOY.md), but a log
+# file on a machine that processes clinical text is still operational state
+# about a specific deployment and not a fact about the source, so it is never
+# committed. .run/ holds pidfiles and the recorded start mechanism.
+logs/
+.run/
+
 # OS
 .DS_Store
 Thumbs.db

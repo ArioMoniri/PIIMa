@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>deid-tr panel</title>
+    <!--
+      THE SAME POLICY THE VANILLA PANEL ENFORCES, on a bundled app. This is the
+      part of the React surface that was genuinely at risk: a build pipeline
+      decides for you what ends up inline, and the honest way to hold this line
+      is to declare the policy first and make the build conform to it, rather
+      than to relax the policy until the bundler is happy.
+
+      NOTHING IS LOADED FROM A NETWORK ORIGIN. No CDN, no web font, no icon
+      sprite, no remote image, no analytics. Every byte comes from this
+      directory or from the sibling ./pkg-web/.
+
+      `connect-src 'self'` permits exactly one request -- this page fetching its
+      own .wasm -- and forbids every cross-origin fetch, XHR, WebSocket,
+      EventSource and beacon.
+
+      `script-src 'self'` blocks inline scripts SILENTLY, so Vite's
+      module-preload polyfill (an inline <script>) is switched off in
+      vite.config.ts. `style-src 'self'` likewise blocks a runtime-injected
+      <style> element, so the CSS is one emitted file loaded by <link>. React's
+      own `style={{...}}` prop is unaffected: it writes through CSSOM
+      (`node.style.setProperty`), which CSP does not govern.
+
+      `img-src 'none'` and `font-src 'none'` are not belt-and-braces. They are
+      the two directives that would otherwise let a dependency pull a tracking
+      pixel or a Google font without anything on screen changing.
+
+      scripts/check-csp.mjs re-derives all of this from the BUILT output.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'; img-src 'none'; font-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      This panel de-identifies text in your browser and needs JavaScript to do
+      it. Nothing you paste is uploaded either way. The vanilla panel at
+      bindings/wasm/panel/ has the same requirement and no build step.
+    </noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

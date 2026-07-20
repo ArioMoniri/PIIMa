@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>deid-tr</title>
+    <!--
+      NOTHING IS LOADED FROM A NETWORK ORIGIN. No CDN, no web font, no icon
+      sprite, no analytics, no source map served from anywhere. Every byte of
+      this window comes from this directory, which is compiled into the binary.
+
+      The enforced policy is the `csp` field in tauri.conf.json -- Tauri sets it
+      on the custom protocol response, which is the copy an attacker cannot edit
+      by injecting a <meta> tag. This tag is the same policy written where a
+      reader of the page will look for it, and a mismatch between the two is a
+      bug in whichever was edited alone.
+
+      `script-src 'self'` blocks inline scripts SILENTLY, so every script here is
+      an external module file. Inlining one turns this window into an idle form
+      with no error anywhere.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self'; font-src 'self'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'"
+    />
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <a class="skip" href="#note">Skip to the note editor</a>
+
+    <header class="topbar">
+      <div>
+        <h1>deid-tr</h1>
+        <p class="sub">
+          Turkish clinical de-identification, entirely on this machine.
+          <span id="version" class="mono"></span>
+        </p>
+      </div>
+      <div class="tier">
+        <label for="tier">Assurance tier</label>
+        <select id="tier">
+          <option value="safe-harbor" selected>Safe Harbor - L1 + L4 + L5</option>
+          <option value="expert-determination">
+            Expert Determination - adds L3
+          </option>
+        </select>
+        <p id="tier-note" class="tier-note"></p>
+      </div>
+    </header>
+
+    <!--
+      THE BANNER IS THE MOST IMPORTANT ELEMENT IN THIS WINDOW, and it is in the
+      main view rather than behind a menu because nobody opens an About box
+      before trusting an output. A clinician who redacts a file and sees a count
+      of removed identifiers will assume the name went with them. It did not.
+      Nothing below may push this off the first screen and no count, animation
+      or status line may imply otherwise.
+    -->
+    <aside class="banner" role="note" aria-labelledby="banner-title">
+      <h2 id="banner-title">What this build removes, and what it leaves in</h2>
+      <ul>
+        <li>
+          <strong>Removed:</strong> identifiers the L1 rule layer can prove -
+          TCKN, VKN, IBAN, phone numbers, e-mail addresses, MRNs and dates,
+          checksum-validated where the format carries a checksum.
+        </li>
+        <li class="bad">
+          <strong>NOT removed: names.</strong> Patient, clinician and relative
+          names are the job of the L2 model ensemble.
+          <strong>No L2 model is installed in this build</strong> and no weights
+          ship with it, so deid-tr masks <strong>zero names</strong>. A name in
+          your document is still in the output.
+        </li>
+        <li class="bad">
+          <strong>NOT removed: quasi-identifiers in prose</strong> - employer,
+          relationships, assets, distinctive events. That is L3, which needs a
+          local model you supply.
+        </li>
+        <li>
+          <strong>Not read: pixels.</strong> deid-tr has no OCR. A scanned page
+          is refused rather than returned looking processed.
+        </li>
+      </ul>
+      <p id="disclosure" class="disclosure mono"></p>
+    </aside>
+
+    <main>
+      <section class="panel">
+        <h2>De-identify text</h2>
+        <p class="hint">
+          Nothing typed here leaves this machine. There is no network code in
+          this application and its window is not allowed to make a request.
+        </p>
+        <label class="visually-hidden" for="note">Clinical note</label>
+        <textarea
+          id="note"
+          rows="10"
+          spellcheck="false"
+          placeholder="Paste a note. Use synthetic text unless this machine is where the record already lives."
+        ></textarea>
+        <div class="actions">
+          <button id="run-text" type="button">De-identify text</button>
+          <span id="text-status" class="status" role="status"></span>
+        </div>
+        <label class="visually-hidden" for="output">De-identified output</label>
+        <textarea id="output" rows="10" readonly spellcheck="false"></textarea>
+        <div id="text-spans"></div>
+      </section>
+
+      <section class="panel">
+        <h2>De-identify a file</h2>
+        <p class="hint">
+          PDF, DOCX, TXT, CSV, JSON, JSON Lines. The file is opened, rewritten
+          and saved by the native side; its contents never enter this window and
+          this window is never told what it was called.
+        </p>
+        <div class="actions">
+          <button id="run-file" type="button">Choose a file and redact it</button>
+          <span id="file-status" class="status" role="status"></span>
+        </div>
+        <div id="file-report"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Which layers are live</h2>
+        <p class="hint">
+          Read from the pipeline this process actually built, not from a
+          configuration file.
+        </p>
+        <div id="layers"></div>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

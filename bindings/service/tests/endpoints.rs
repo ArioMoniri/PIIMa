@@ -400,7 +400,14 @@ fn a_bearer_token_on_a_loopback_bind_is_enforced_on_every_route() {
     // has a real reason to authenticate a local service, and silently dropping
     // the credential they configured would be a control that reports success and
     // does nothing.
-    let secret = "k".repeat(deid_tr_service::MIN_TOKEN_LEN);
+    // Cycles the alphabet so it clears the length floor AND the distinct-character
+    // floor. `"k".repeat(...)` cleared only the first, and once the bind gate
+    // started enforcing what the preflight already required, this test was
+    // asserting that an authenticated bind works while handing it a credential
+    // the product refuses.
+    let secret: String = (0..deid_tr_service::MIN_TOKEN_LEN)
+        .map(|index| char::from(b'a' + u8::try_from(index % 26).unwrap_or(0)))
+        .collect();
     let listen = bind::plan(bind::default_host(), 0, false, Some(&secret)).expect("plan");
     let listener = bind_listener(&listen).expect("bind");
     let addr = listener.local_addr().expect("local addr");

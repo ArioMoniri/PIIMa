@@ -319,7 +319,12 @@ mod tests {
         // An unauthenticated /health on an exposed service publishes the tier,
         // the layer inventory and the session ceiling to anyone who can route
         // to it, so there is no exemption.
-        let secret = "t".repeat(MIN_TOKEN_LEN);
+        // Cycles the alphabet: clears the length floor AND the distinct-character
+        // floor. A single repeated character clears only the first, and the bind
+        // gate now refuses it -- see bind::tests::a_long_but_repetitive_token_is_refused.
+        let secret: String = (0..MIN_TOKEN_LEN)
+            .map(|index| char::from(b'a' + u8::try_from(index % 26).unwrap_or(0)))
+            .collect();
         let listen = plan(
             IpAddr::V4(Ipv4Addr::new(192, 168, 1, 5)),
             DEFAULT_PORT,
@@ -363,7 +368,12 @@ mod tests {
 
     #[test]
     fn a_wrong_token_is_refused_and_the_response_does_not_reveal_the_right_one() {
-        let secret = "t".repeat(MIN_TOKEN_LEN);
+        // Cycles the alphabet: clears the length floor AND the distinct-character
+        // floor. A single repeated character clears only the first, and the bind
+        // gate now refuses it -- see bind::tests::a_long_but_repetitive_token_is_refused.
+        let secret: String = (0..MIN_TOKEN_LEN)
+            .map(|index| char::from(b'a' + u8::try_from(index % 26).unwrap_or(0)))
+            .collect();
         let listen = plan(
             IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
             DEFAULT_PORT,

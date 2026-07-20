@@ -6,9 +6,27 @@
 
 set shell := ["bash", "-uc"]
 
-python := "python3"
+# WHY every Python entry point below goes through .venv/bin and not `python3`:
+# on a shared server `python3` is whichever interpreter the last person put on
+# PATH, and its site-packages is whatever the last person pip-installed --user.
+# The eval harness IS the test suite for model behaviour, so a metric that moved
+# must never have "a different library resolved" as a candidate explanation. The
+# venv makes the interpreter part of the checkout. `just venv` builds it,
+# scripts/requirements.txt pins it, .gitignore excludes it, and `_venv` below
+# turns a missing one into a sentence instead of a ModuleNotFoundError.
+venv_dir := ".venv"
+python := ".venv/bin/python"
+ruff := ".venv/bin/ruff"
+mypy := ".venv/bin/mypy"
+requirements := "scripts/requirements.txt"
 airgap_dir := ".airgap"
 dist_dir := "dist"
+
+# Where the detached surfaces keep their pidfiles and their logs. Both are
+# gitignored: a pidfile is machine state and a log is operational output, and
+# neither is a fact about the source tree.
+run_dir := ".run"
+log_dir := "logs"
 
 # The three shippable native binaries, and the cargo packages that produce them. Kept in one
 # place because `build-all`, `package` and `install` must agree on what "every artifact" means;
@@ -20,13 +38,84 @@ bin_pkgs := "-p deid-tr-cli -p deid-tr-mcp -p deid-tr-service"
 default:
     @just --list
 
+# Create or update the Python environment every Python recipe here runs in.
+#
+# WHY IDEMPOTENT VIA A STAMP AND NOT VIA `pip install` BEING CHEAP: pip with
+# everything already satisfied still resolves, which on a server with no route to
+# an index is not a no-op, it is a two-minute timeout. The stamp records the
+# checksum of scripts/requirements.txt that was last installed successfully; a
+# matching stamp means this recipe does nothing and says so. Editing the
+# requirements file changes the checksum, which is what makes the stamp honest
+# rather than merely fast.
+#
+# WHY `uv` IS USED WHEN PRESENT: it is an order of magnitude faster and resolves
+# the same pins. It is preferred, never required -- a recipe that needs a tool
+# the operator has not got is a recipe that does not run.
+#
+# Create or update .venv from scripts/requirements.txt. Idempotent.
+venv:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    stamp="{{venv_dir}}/.requirements.sha256"
+    want="$(shasum -a 256 "{{requirements}}" 2>/dev/null || sha256sum "{{requirements}}")"
+    want="${want%% *}"
+    if [ -x "{{python}}" ] && [ -f "${stamp}" ] && [ "$(cat "${stamp}")" = "${want}" ]; then
+        echo "venv: current ({{python}}, {{requirements}} unchanged since last install)"
+        exit 0
+    fi
+    if [ ! -x "{{python}}" ]; then
+        # python3 is used HERE and only here: bootstrapping the venv is the one
+        # step that cannot already be inside it.
+        if ! command -v python3 >/dev/null 2>&1; then
+            echo "venv: FAIL - python3 is not installed, so no environment can be created." >&2
+            exit 1
+        fi
+        echo "venv: creating {{venv_dir}} with $(python3 --version)"
+        if command -v uv >/dev/null 2>&1; then
+            uv venv "{{venv_dir}}"
+        else
+            python3 -m venv "{{venv_dir}}"
+        fi
+    fi
+    echo "venv: installing {{requirements}}"
+    if command -v uv >/dev/null 2>&1; then
+        VIRTUAL_ENV="{{venv_dir}}" uv pip install --python "{{python}}" -r "{{requirements}}"
+    else
+        "{{python}}" -m pip install --quiet --upgrade pip
+        "{{python}}" -m pip install -r "{{requirements}}"
+    fi
+    echo "${want}" > "${stamp}"
+    echo "venv: OK - {{python}}"
+    "{{python}}" -c 'import sys; print("venv: interpreter", sys.version.split()[0], "at", sys.executable)'
+
+# Assert the venv exists, and turn its absence into a sentence.
+#
+# WHY a private guard recipe rather than letting the interpreter path fail:
+# `.venv/bin/python: No such file or directory` and `ModuleNotFoundError: No
+# module named 'yaml'` are both true and neither tells an operator what to type.
+# This is a dependency of every Python-running recipe in this file, so the answer
+# arrives before the failure does.
+_venv:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -x "{{python}}" ]; then
+        echo "This repository runs Python out of {{venv_dir}}, which does not exist here." >&2
+        echo "  create it with:   just venv" >&2
+        echo "  or run full setup: ./scripts/server-setup.sh" >&2
+        echo "" >&2
+        echo "  WHY not the system python3: on a shared machine its site-packages is a" >&2
+        echo "  different set on every login, and the eval harness is the test suite for" >&2
+        echo "  model behaviour. A moving library set is a moving metric." >&2
+        exit 1
+    fi
+
 # The Definition of Done gate. Nothing merges that does not pass this.
 #
 # WHY verify-hooks and test-hooks come first: they are the cheapest recipes here and they gate
 # the gates. A fresh clone has no .git/hooks/pre-commit, so without verify-hooks the PHI
 # pre-commit scan silently does not run; and a guard whose own tests are not in `check` rots
 # into a guard that passes everything.
-check: verify-hooks test-hooks core-no-socket mcp-no-socket fmt lint test drift-check eval
+check: _venv verify-hooks test-hooks core-no-socket mcp-no-socket fmt lint test drift-check eval
     @echo "check: OK"
 
 # I1, structurally: nothing in core/'s RESOLVED dependency graph can open a socket.
@@ -128,7 +217,7 @@ test-hooks:
 # WHY: formatting is not taste - a stable format keeps diffs reviewable, and a reviewable
 # diff is how a PHI leak gets caught by a human.
 # Format Rust and Python sources.
-fmt:
+fmt: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -f core/Cargo.toml ] || [ -f Cargo.toml ]; then
@@ -136,15 +225,13 @@ fmt:
     else
         echo "fmt: no Cargo.toml yet, skipping cargo fmt"
     fi
-    if command -v ruff >/dev/null 2>&1; then
-        ruff format eval/ tests/ scripts/ 2>/dev/null || ruff format eval/ tests/
-    else
-        echo "fmt: ruff not installed, skipping (pip install ruff)"
-    fi
+    # The venv's ruff, not PATH's. A formatter whose version varies by login
+    # reformats the tree on alternate days and every diff carries the churn.
+    "{{ruff}}" format eval/ tests/ scripts/
 
 # WHY -D warnings: a warning nobody fixes is a warning nobody reads.
 # Lint Rust and Python, warnings fatal.
-lint:
+lint: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -f core/Cargo.toml ] || [ -f Cargo.toml ]; then
@@ -152,19 +239,16 @@ lint:
     else
         echo "lint: no Cargo.toml yet, skipping cargo clippy"
     fi
-    if command -v ruff >/dev/null 2>&1; then
-        ruff check eval/ tests/
-    else
-        echo "lint: ruff not installed, skipping (pip install ruff)"
-    fi
-    if command -v mypy >/dev/null 2>&1; then
-        mypy --strict eval/
-    else
-        echo "lint: mypy not installed, skipping (pip install mypy)"
-    fi
+    # WHY these no longer skip when the tool is absent: they used to print
+    # "not installed, skipping" and exit 0, which made `just check` green on a
+    # machine where two of its gates did not run. The venv is now a hard
+    # prerequisite of this recipe (`_venv`), so absence is a setup error with a
+    # fix attached rather than a gate quietly turning itself off.
+    "{{ruff}}" check eval/ tests/
+    "{{mypy}}" --strict eval/
 
 # Run the deterministic test suite (TDD layer A) in both languages.
-test:
+test: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -f core/Cargo.toml ] || [ -f Cargo.toml ]; then
@@ -178,7 +262,7 @@ test:
     {{python}} -m pytest tests/ eval/redteam/tests/ -q
 
 # The eval harness IS the test suite for model behaviour (TDD layer B). Reports only.
-eval:
+eval: _venv
     {{python}} eval/run.py --detector null --out eval/results/latest.json
     {{python}} eval/report.py eval/results/latest.json
 
@@ -195,7 +279,7 @@ eval:
 # the ones they mean to stand behind. A recipe that commits on their behalf turns provenance
 # into automation, which is the exact decoupling D-003 exists to prevent. It prints the command
 # and stops.
-eval-commit:
+eval-commit: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     run_id="$(date -u +%Y%m%dT%H%M%SZ)-null"
@@ -227,14 +311,14 @@ eval-commit:
 # WHY separate from `eval`: during development you want to see the numbers even when they are
 # bad; in CI a failed gate must be fatal.
 # Run the eval and exit non-zero on any failed release gate.
-eval-gates:
+eval-gates: _venv
     {{python}} eval/run.py --detector null --out eval/results/latest.json
     {{python}} eval/report.py eval/results/latest.json --gates
 
 # WHY it is safe to re-run: the golden set is append-only (I7). This regenerates derived
 # artifacts only; it never deletes or weakens a fixture.
 # Rebuild the golden set.
-build-gold:
+build-gold: _venv
     {{python}} eval/build_gold.py
 
 # Proves I1: zero network syscalls during the core test suite.
@@ -250,7 +334,7 @@ build-gold:
 # PYTHONPATH shadows the interpreter's own, which on some installs is what puts site-packages on
 # sys.path - the suite then fails to import its dependencies and the gate looks broken.
 # Run the test suite with networking disabled and prove zero network syscalls (I1).
-test-airgapped:
+test-airgapped: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p "{{airgap_dir}}"
@@ -323,7 +407,7 @@ test-airgapped:
 # WHY: no backbone ships for Turkish unless its tokenizer round-trips code-switched medical
 # terms carrying Turkish morphology (carcinoma'li, MRI'da).
 # Run the I6 backbone/language tokenizer gate.
-gate-tokenizer:
+gate-tokenizer: _venv
     {{python}} scripts/gate_tokenizer.py
 
 # WHY it runs the PIPELINE masker: this recipe answers "what does the real product leak", and
@@ -346,18 +430,18 @@ gate-tokenizer:
 # absence of a red-team run nor somebody else's red-team run is a passing score.
 #
 # L6 validates L3 by trying to re-identify our own output. Eval only, never in the masking path.
-red-team:
+red-team: _venv
     {{python}} -m eval.redteam.runner --masker pipeline --out eval/results/redteam.json
 
 # Enforcing form: exit non-zero when the contextual re-ID rate exceeds thresholds.yaml's
 # contextual.reid_rate_max (D-008, <= 5%).
-red-team-gates:
+red-team-gates: _venv
     {{python}} -m eval.redteam.runner --masker pipeline --out eval/results/redteam.json --gate
 
 # The calibration sweep: all three reference maskers, so the three reference points that prove
 # the red team discriminates are reproducible in one command. None of these writes
 # eval/results/redteam.json, because none of their numbers may reach the gate.
-red-team-calibrate:
+red-team-calibrate: _venv
     {{python}} -m eval.redteam.runner --masker null   --out eval/results/redteam-calibration-null.json
     {{python}} -m eval.redteam.runner --masker leaky  --out eval/results/redteam-calibration-leaky.json
     {{python}} -m eval.redteam.runner --masker oracle --out eval/results/redteam-calibration-oracle.json
@@ -366,7 +450,7 @@ red-team-calibrate:
 # WHY a separate recipe: emission mutates eval/adversarial/, and I7 makes the golden set
 # append-only, so growing it is a deliberate act rather than a side effect of looking at a
 # number. The writer never opens a committed fixture file - it creates one named for the run.
-red-team-emit:
+red-team-emit: _venv
     {{python}} -m eval.redteam.runner --masker pipeline --out eval/results/redteam.json --emit-fixtures
 
 # WHY it refuses by default: publication is irreversible and a card must be a build artifact
@@ -487,7 +571,7 @@ pull:
 # annotated in a fixture but absent from the vocabulary means L4 has no runtime
 # reference for it, which is a masked `carcinoma` waiting to happen.
 # Report drift between the fixture annotations and eval/allowlist/*.txt.
-allowlist-drift *ARGS:
+allowlist-drift *ARGS: _venv
     {{python}} -m eval.allowlist {{ARGS}}
 
 # The enforcing form, wired into `check`. WHY it is a separate recipe: a `just`
@@ -495,7 +579,7 @@ allowlist-drift *ARGS:
 # reporting mode is the reason eight terms sat unreconciled while the recipe
 # exited 0. Residual drift is legal only when eval.allowlist.DRIFT_EXCEPTIONS
 # records why.
-drift-check:
+drift-check: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     {{python}} -m eval.allowlist --strict --examples 40
@@ -556,25 +640,21 @@ build-python-wheel:
 # mypy_path points at it. pytest needs the compiled module and says so.
 #
 # Lint (ruff), type-check (mypy --strict) and test the Python binding.
-test-python:
+test-python: _venv
     #!/usr/bin/env bash
     set -euo pipefail
+    # Resolved to absolute BEFORE the cd: the venv paths in this file are
+    # relative to the repository root, and a relative interpreter path after a
+    # cd is a "no such file" two directories away from where it was written.
+    py="$(pwd)/{{python}}"
+    ruff="$(pwd)/{{ruff}}"
+    mypy="$(pwd)/{{mypy}}"
     cd bindings/python
-    if command -v ruff >/dev/null 2>&1; then
-        ruff format --check .
-        ruff check .
-    else
-        echo "test-python: ruff not installed (pip install ruff)" >&2
-        exit 1
-    fi
-    if command -v mypy >/dev/null 2>&1; then
-        mypy --strict
-    else
-        echo "test-python: mypy not installed (pip install mypy)" >&2
-        exit 1
-    fi
-    if {{python}} -c "import deid_tr" >/dev/null 2>&1; then
-        {{python}} -m pytest tests/ -q
+    "${ruff}" format --check .
+    "${ruff}" check .
+    "${mypy}" --strict
+    if "${py}" -c "import deid_tr" >/dev/null 2>&1; then
+        "${py}" -m pytest tests/ -q
     else
         echo "test-python: the extension is not importable; run 'just build-python' first." >&2
         exit 1
@@ -681,7 +761,7 @@ serve-offline-proof: (_serve "tests/index.html")
 # The document root is bindings/wasm rather than the page's own directory,
 # because both pages load the module from the sibling ../pkg-web/ and a root at
 # the page directory puts that path outside the served tree.
-_serve page:
+_serve page: _venv
     #!/usr/bin/env bash
     set -euo pipefail
     if [ ! -d bindings/wasm/pkg-web ]; then
@@ -693,20 +773,13 @@ _serve page:
         exit 1
     fi
     echo "open http://127.0.0.1:8722/{{page}} and watch the Network tab"
-    echo "Ctrl-C to stop. Nothing pasted into the page leaves this machine."
-    # no-store, because http.server otherwise lets the browser hold a stale copy
-    # of the page and its glue. Editing the panel and reloading then shows the
-    # OLD revision with no indication it is old, which is an afternoon lost to
-    # debugging a bug that was already fixed on disk.
-    cd bindings/wasm && {{python}} - <<'PY'
-    import functools, http.server
-    class Handler(http.server.SimpleHTTPRequestHandler):
-        def end_headers(self):
-            self.send_header("Cache-Control", "no-store")
-            super().end_headers()
-    http.server.HTTPServer(("127.0.0.1", 8722),
-        functools.partial(Handler, directory=".")).serve_forever()
-    PY
+    echo "Ctrl-C to stop, or run 'just up' to start it detached instead."
+    # Delegated to scripts/panel_server.py rather than inlined here, because
+    # `just up` starts the same page detached and a second inline copy of the
+    # bind address is a second place for it to drift off 127.0.0.1 (I3). One
+    # module, one host constant, both callers.
+    exec "{{python}}" scripts/panel_server.py \
+        --port 8722 --directory bindings/wasm --page "{{page}}"
 
 # ---------------------------------------------------------------------------
 # Build and packaging: one command per artifact class, no shell history.
@@ -1091,3 +1164,39 @@ deploy-check *ARGS:
     fi
     echo "deploy-check: no blocking findings. Read the WARN lines before you proceed --"
     echo "  they are the ones that are true of correct deployments as well as broken ones."
+
+# ---------------------------------------------------------------------------
+# Detached surfaces: up / down / status / logs
+#
+# WHY THESE EXIST ALONGSIDE deploy-local AND serve-panel: those two run in the
+# foreground and die with the terminal. On a laptop that is correct - you can see
+# what you started. Over SSH it is not: the link drops, SIGHUP reaches the
+# process group, and the service a clinician was pointed at vanishes for a reason
+# unrelated to the service. The foreground recipes stay, because a foreground
+# process with a visible log is still the best way to debug one; these are what
+# you run on a server.
+#
+# WHY THE BODY IS IN scripts/surfaces.sh: up, down and status must agree exactly
+# on the pidfile path, the port and the mechanism. Three recipes is three chances
+# to disagree, and the disagreement surfaces as `just down` claiming success over
+# a process still holding the port.
+#
+# I3 IS UNCHANGED BY DETACHING. Both surfaces bind 127.0.0.1 and the script has
+# no host argument to give them. Reach them over an SSH tunnel.
+# ---------------------------------------------------------------------------
+
+# Start the surfaces detached (tmux if present, else nohup + pidfile).
+up *ARGS:
+    ./scripts/surfaces.sh up {{ARGS}}
+
+# Stop the surfaces and VERIFY each port is actually free afterwards.
+down *ARGS:
+    ./scripts/surfaces.sh down {{ARGS}}
+
+# What is running, under which mechanism, on which port, with which log.
+status:
+    ./scripts/surfaces.sh status
+
+# Tail the persisted surface logs. `just logs serve -f` follows one of them.
+logs *ARGS:
+    ./scripts/surfaces.sh logs {{ARGS}}

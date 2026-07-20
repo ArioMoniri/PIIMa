@@ -63,11 +63,40 @@ pub const DEFAULT_PORT: u16 = 8787;
 /// The shortest bearer token this binary will accept for an exposed bind.
 ///
 /// 32 characters, which is 128 bits at hex and more at base64. Not a
-/// password-strength heuristic -- a length floor cannot measure entropy, and
-/// this one will happily accept thirty-two `a`s. What it does buy is that the
-/// token cannot be a word, a hostname, or the name of the department, which is
-/// what a field with no floor at all actually receives.
+/// password-strength heuristic: a length floor cannot measure entropy. What it
+/// does buy is that the token cannot be a word, a hostname, or the name of the
+/// department, which is what a field with no floor at all actually receives.
 pub const MIN_TOKEN_LEN: usize = 32;
+
+/// The fewest distinct characters a bearer token may contain.
+///
+/// WHY THIS LIVES HERE AND NOT ONLY IN `preflight`. It used to be only there,
+/// and that was backwards: `deid-serve --expose --token aaaa...` (thirty-two
+/// `a`s) STARTED AND BOUND, while `just deploy-check` with the identical flags
+/// exited 3 and called it a failure. The advisory gate was stricter than the
+/// thing it advises about.
+///
+/// An advisory check may be stricter than the runtime -- it can afford to warn
+/// about a password-shaped token it cannot prove is weak. It must never be the
+/// only thing standing between a weak credential and an exposed port, because
+/// the operator who skips the preflight is exactly the operator whose token is
+/// thirty-two `a`s.
+///
+/// Kept equal to `preflight::MIN_DISTINCT_CHARS`, with a test asserting they do
+/// not drift apart.
+pub const MIN_DISTINCT_TOKEN_CHARS: usize = 10;
+
+/// The runtime floor may never be weaker than the advisory floor.
+///
+/// A COMPILE-TIME assertion, not a test. The relationship it pins is the whole
+/// point of moving this constant out of `preflight`: an advisory check is
+/// allowed to grow stricter, because it can afford to warn about a
+/// password-shaped token it cannot prove is weak. What it may never do is be the
+/// only thing enforcing a rule, because the operator who skips the preflight is
+/// exactly the operator whose token is thirty-two `a`s. Written as a `const`
+/// block so a future edit that lowers this floor below the advisory one fails to
+/// build rather than failing a test somebody can mark ignored.
+const _: () = assert!(MIN_DISTINCT_TOKEN_CHARS >= crate::preflight::MIN_DISTINCT_CHARS);
 
 /// The text printed to stderr before the listener is created, whenever the
 /// bind is not loopback.
@@ -113,6 +142,18 @@ pub enum Refusal {
     /// A bearer token shorter than [`MIN_TOKEN_LEN`].
     #[error("refused: the bearer token is shorter than the {MIN_TOKEN_LEN}-character minimum")]
     TokenTooShort,
+    /// A bearer token with fewer than [`MIN_DISTINCT_TOKEN_CHARS`] distinct characters.
+    ///
+    /// Long but repetitive: thirty-two `a`s clears the length floor and is not a
+    /// credential. Says what to do rather than only what is wrong, because an
+    /// operator who hits this is mid-deployment and will otherwise pad the
+    /// token out to satisfy it.
+    #[error(
+        "refused: the bearer token has fewer than {MIN_DISTINCT_TOKEN_CHARS} distinct characters, \
+         so it is long but not random. Generate one instead of typing one: \
+         `openssl rand -base64 32` or `head -c 32 /dev/urandom | base64`"
+    )]
+    TokenTooRepetitive,
     /// `--expose` with a loopback host.
     #[error(
         "refused: --expose was given but --host is a loopback address, so nothing would be \
@@ -136,12 +177,23 @@ impl Token {
     /// # Errors
     ///
     /// [`Refusal::TokenTooShort`] below [`MIN_TOKEN_LEN`] characters.
+    /// [`Refusal::TokenTooRepetitive`] below [`MIN_DISTINCT_TOKEN_CHARS`] distinct characters.
     pub fn new(value: &str) -> Result<Self, Refusal> {
         // CHARACTERS, not bytes: a token pasted from a password manager may be
         // multi-byte, and counting its bytes would let a 32-byte, 11-character
         // token through while rejecting nothing an attacker would try.
         if value.chars().count() < MIN_TOKEN_LEN {
             return Err(Refusal::TokenTooShort);
+        }
+        // The distinct-character floor the preflight already applied. Neither
+        // check measures entropy and neither claims to; together they rule out
+        // the two shapes a hand-typed token actually takes, which is a short one
+        // and a padded one.
+        let mut distinct: Vec<char> = value.chars().collect();
+        distinct.sort_unstable();
+        distinct.dedup();
+        if distinct.len() < MIN_DISTINCT_TOKEN_CHARS {
+            return Err(Refusal::TokenTooRepetitive);
         }
         Ok(Self(value.to_owned()))
     }
@@ -283,10 +335,21 @@ mod tests {
     use super::*;
     use std::net::Ipv6Addr;
 
-    /// A token that clears the floor, built rather than written so its length
+    /// A token that clears BOTH floors, built rather than written so its length
     /// is a property of the test instead of a thing to miscount.
+    ///
+    /// It used to be `"t".repeat(MIN_TOKEN_LEN)`, which cleared the length floor
+    /// and had exactly one distinct character. When the distinct-character floor
+    /// moved from the advisory preflight into the bind gate, this fixture failed
+    /// eight tests at once, which is the fixture telling the truth: every one of
+    /// those tests had been asserting that an exposed bind works while handing it
+    /// a credential the product now refuses.
     fn good_token() -> String {
-        "t".repeat(MIN_TOKEN_LEN)
+        // Cycles the alphabet, so length and distinct count are both derived
+        // rather than typed, and neither drifts if a floor moves again.
+        (0..MIN_TOKEN_LEN)
+            .map(|index| char::from(b'a' + u8::try_from(index % 26).unwrap_or(0)))
+            .collect()
     }
 
     /// The IPv4 all-interfaces address, assembled at runtime.
@@ -505,5 +568,43 @@ mod tests {
         assert!(message.contains("--expose"));
         assert!(message.contains("loopback"));
         assert!(!message.contains("192.168"));
+    }
+
+    /// A long, repetitive token is refused at the BIND, not only at the preflight.
+    ///
+    /// THE INVERSION THIS PINS. `Token::new` used to check length alone, so
+    /// `deid-serve --expose --token <thirty-two 'a's>` started and bound a
+    /// non-loopback port, while `just deploy-check` with the identical flags
+    /// exited 3 and called it a failure. The advisory gate was stricter than the
+    /// thing it advises about, which is the wrong way round: the operator who
+    /// skips the preflight is precisely the operator whose token is thirty-two
+    /// `a`s.
+    #[test]
+    fn a_long_but_repetitive_token_is_refused_at_the_bind() {
+        let padded = "a".repeat(MIN_TOKEN_LEN);
+        assert_eq!(
+            padded.chars().count(),
+            MIN_TOKEN_LEN,
+            "clears the length floor"
+        );
+        assert_eq!(
+            Token::new(&padded).err(),
+            Some(Refusal::TokenTooRepetitive),
+            "a token long enough to pass the length check is still not a credential"
+        );
+        assert_eq!(
+            plan(lan(), DEFAULT_PORT, true, Some(&padded)).err(),
+            Some(Refusal::TokenTooRepetitive),
+            "and it must not reach a non-loopback bind"
+        );
+    }
+
+    /// A generated token still works. A guard that blocks the correct action gets removed.
+    #[test]
+    fn a_randomly_generated_token_is_accepted() {
+        let generated = "kQ7fV2mZ9pR4tL0kB6nH3sD8wG1jY5cX";
+        assert_eq!(generated.chars().count(), MIN_TOKEN_LEN);
+        assert!(Token::new(generated).is_ok());
+        assert!(plan(lan(), DEFAULT_PORT, true, Some(generated)).is_ok());
     }
 }
