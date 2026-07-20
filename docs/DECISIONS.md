@@ -1787,3 +1787,70 @@ reaches the adjudicator on its own evidence.
 - `Fold::Compose`, `Skeleton::original_slice`, `invisible::contains_invisible` and
   `invisible::contains_bidi_control` remain unconsumed by the pipeline. They are documented in
   `text/mod.rs` as signals offered to bindings, explicitly NOT as controls this crate enforces.
+
+---
+
+## D-037 — Both escalation rates re-measured over the full 190-document corpus: 40.5% and 3.83%
+
+- **Date:** 2026-07-20
+- **Status:** ACCEPTED. Supersedes the NUMBERS in D-023 (3.87%) and D-027 (40.0%). Neither ADR is
+  withdrawn and neither is edited — `docs/DECISIONS.md` is append-only, and both remain correct
+  accounts of what was measured when they were written. Their reasoning stands unchanged; only the
+  denominators grew.
+
+**The defect.** `core/src/route/mod.rs::corpus_measurement` embeds its corpus with `include_str!`,
+which requires literal paths, so it carries a hardcoded list of fixture files. The eval harness
+(`eval/build_gold.py`) discovers fixtures with `rglob("*.jsonl")`. When
+`eval/adversarial/adv_unicode.jsonl` added 12 documents, the harness moved to 190 and the Rust
+measurement stayed on 178. Nothing failed. Both sides were internally consistent, `cargo test` was
+green, and the escalation rate published in `docs/COMPARISON.md` section 4 quietly described a
+smaller corpus than the benchmark numbers printed beside it.
+
+This is the same shape as the defects behind D-029 and the `bundled_allowlist` finding: code that
+is correct, tested, and wired to something other than the thing it is quoted against. It is the
+most dangerous failure mode this project has, because every gate stays green.
+
+**Re-measured, 2026-07-20, over the same 190 documents the harness walks:**
+
+| Quantity | Denominator | Was | Now |
+|---|---|---|---|
+| Vocabulary escalation rate | class C vocabulary occurrences | 74 of 1910, **3.87%** (D-023) | 74 of 1934, **3.83%** |
+| Router escalation rate | candidates reaching `route()` | 268 of 670, **40.0%** (D-027) | 274 of 677, **40.5%** |
+
+**What did not change: the conclusion.** D-027's finding was that the brief's "2–5% of spans"
+claim for the Safe Harbor tier is wrong by roughly an order of magnitude. 40.5% is not materially
+different from 40.0%, and the correction stands exactly as written. The 12 added documents are
+Unicode-evasion fixtures — dense in identifiers, thin in prose — so they add candidates without
+shifting the distribution much. **Nobody should read this ADR as the rate having moved. It moved by
+half a point; what moved is that the number now describes the corpus it is quoted against.**
+
+The escalated-label breakdown is unchanged in shape: MRN 156, TCKN 96, SGK_NO 11, IBAN 7, VKN 4.
+MRN and TCKN dominate for the reason D-027 gives — both are emitted at 0.50, below
+`ESCALATION_CONFIDENCE_MAX` (0.60), so every one of them escalates.
+
+**Still zero checksum-validated and zero multi-detector auto-masks**, over all 677 candidates. That
+is not a router defect: I8 forbids a checksum-valid Turkish ID from existing in this repository, so
+no corpus document can contain one, and L2 is a stub so no second detector exists to agree. The
+`is_protected()` guardrail — the single most safety-critical predicate in the crate — is therefore
+correct and armed on nothing here. It is exercised instead by
+`core/tests/checksum_protection_armed.rs`, which generates valid identifiers at runtime and never
+writes one to disk.
+
+**Consequences.**
+
+- Two published figures were stale for a session and are now correct. The cost of the fix was one
+  `include_str!` line; the cost of *finding* it was a reader noticing that two numbers on the same
+  page described different corpora.
+- `tests/test_corpus_manifest.py` now fails when a fixture exists on disk but is not embedded in
+  `CORPUS`, in both directions. This is the real remediation — the number was a symptom, the
+  hand-maintained list was the defect, and without the guard the next fixture file re-creates it.
+  Verified by removing the `adv_unicode` line and confirming the test fails and names the file.
+- The guard lives in Python, not Rust, because the check needs to read a directory and `core/`
+  performs no runtime I/O (I1). A drift check that cannot look at the filesystem cannot detect
+  drift, so it belongs on the side of the boundary where filesystem access is ordinary.
+- The rate is still **reported, not gated**. Asserting a ceiling here would either fail the build
+  for reporting a true number or invite someone to move `ESCALATION_CONFIDENCE_MAX` until the
+  number looked right, which is tuning a metric rather than measuring one. That reasoning is
+  D-027's and it is unchanged.
+- Both measurements remain averages over a mixed corpus, and D-023's caveat about eponym-dense
+  documents still applies unchanged.

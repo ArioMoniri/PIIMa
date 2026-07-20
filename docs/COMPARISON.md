@@ -313,16 +313,24 @@ anywhere in the flagging path, because a converging council that out-votes the s
 saw an identifier is a breach machine. The cost is precision, and it is measurable: our micro
 precision in the run named at the top of this document is 0.8863, meaning roughly one in nine masked
 spans is not a gold identifier. It also costs money — our own measurement found the L4 adjudicator
-escalation rate is **40.0%** of routed candidates (268 of 670), not the 2-5% the project brief
-assumed (D-027). We corrected the brief rather than the constant, because moving
-`ESCALATION_CONFIDENCE_MAX` to make the number look right would have been tuning the metric.
+escalation rate is **40.5%** of routed candidates (274 of 677), not the 2-5% the project brief
+assumed (D-027, re-measured in D-037). We corrected the brief rather than the constant, because
+moving `ESCALATION_CONFIDENCE_MAX` to make the number look right would have been tuning the metric.
 
-That 40.0% carries a caveat this document owes the reader, since it is the one figure here that is
-**not** from the run named at the top. It comes from
+That figure comes from
 `core/src/route/mod.rs::corpus_measurement::report_the_router_escalation_rate_over_routed_candidates`,
-printed on every test run, and that measurement currently walks **178 records** while the eval
-corpus is 190 documents. It has not been re-measured over the 12 documents added since. Treat it as
-a figure for the smaller corpus, not for the one section 6 scores.
+printed on every test run, and it now walks the **same 190 documents** the eval harness walks, so it
+describes the corpus section 6 scores rather than a smaller one. An earlier revision of this
+document carried a caveat here: the measurement embedded a hand-written list of fixture files while
+the harness discovered them by glob, so when 12 Unicode-evasion fixtures were added the harness
+moved to 190 and this number stayed on 178. Nothing failed and every test stayed green — the rate
+simply described a different corpus than the benchmark printed beside it. That is now guarded by
+`tests/test_corpus_manifest.py`, which fails when the two lists disagree in either direction.
+
+Re-measuring moved it from 40.0% to 40.5%, and moved the vocabulary escalation rate from 3.87% to
+3.83%. **Neither is a meaningful change and the conclusion is untouched**: the brief's 2-5% claim is
+still wrong by roughly an order of magnitude. What changed is that the number is now quoted against
+the corpus it was measured on.
 
 **The medical allowlist is context-sensitive and therefore heuristic.** Masking `carcinoma`
 destroys the note, so a negative vocabulary is mandatory. But `Deva` is both a Turkish given name

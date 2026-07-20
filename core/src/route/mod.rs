@@ -47,9 +47,9 @@ mod corpus_measurement {
     //! The cost bound is the claim that makes the tier cheap, so it is measured
     //! here rather than asserted in a comment. THIS MODULE HOLDS TWO
     //! MEASUREMENTS WITH DIFFERENT DENOMINATORS and they are not
-    //! interchangeable: the test below counts VOCABULARY OCCURRENCES (3.87%),
+    //! interchangeable: the test below counts VOCABULARY OCCURRENCES (3.83%),
     //! and `report_the_router_escalation_rate_over_routed_candidates` counts
-    //! ROUTED CANDIDATES (40.0%). Quoting the first against the brief's 2-5%
+    //! ROUTED CANDIDATES (40.5%). Quoting the first against the brief's 2-5%
     //! claim, which is about the second, is the error D-027 corrects.
     //!
     //! The measurement below is deliberately narrow about what it can and
@@ -64,17 +64,26 @@ mod corpus_measurement {
     //!   the escalation ceiling is not yet observable, and inventing it here
     //!   would produce a number that looks measured and is not.
     //!
-    //! MEASURED, 2026-07-19, over 178 documents and 1910 vocabulary
-    //! occurrences: 1819 kept deterministically, 17 masked on decisive person
-    //! evidence, 74 escalated to the adjudicator model -- 3.87% OF VOCABULARY
+    //! MEASURED, 2026-07-20, over 190 documents and 1934 vocabulary
+    //! occurrences: 1843 kept deterministically, 17 masked on decisive person
+    //! evidence, 74 escalated to the adjudicator model -- 3.83% OF VOCABULARY
     //! OCCURRENCES. That is not the brief's 2-5%, which is a fraction of routed
-    //! candidates; see D-027. The number is printed on every run so a
+    //! candidates; see D-027 and D-037. The number is printed on every run so a
     //! regression shows up as a changed line rather than as a silently slower
     //! pipeline.
     //!
     //! The corpus text is embedded with `include_str!`, so this stays
     //! compile-time and `core/` still performs no runtime I/O (I1). Every
     //! fixture is synthetic (I8).
+    //!
+    //! `CORPUS` IS MAINTAINED BY HAND AND WILL DRIFT. `include_str!` needs
+    //! literal paths, so this list cannot glob the way `eval/build_gold.py`
+    //! does -- and it silently fell behind by 12 documents once already, which
+    //! left a published escalation rate describing a smaller corpus than the
+    //! benchmark printed beside it (D-037). `tests/test_corpus_manifest.py`
+    //! now compares this list against the fixtures on disk and fails when they
+    //! disagree, because the failure mode is a number that stays plausible
+    //! rather than a build that breaks.
 
     use super::allowlist::is_word_char;
     use super::evidence::{Assessment, PersonEvidence};
@@ -93,6 +102,7 @@ mod corpus_measurement {
         include_str!("../../../eval/adversarial/adv_direct.jsonl"),
         include_str!("../../../eval/adversarial/adv_eponym.jsonl"),
         include_str!("../../../eval/adversarial/adv_medical_term.jsonl"),
+        include_str!("../../../eval/adversarial/adv_unicode.jsonl"),
     ];
 
     /// Pull the `text` field out of one JSONL record without a JSON parser.
