@@ -115,9 +115,15 @@ The PDF path is **true redaction**, not a black rectangle: content-stream remova
 rewrite, then re-open and re-extract to verify the text is actually gone. Two findings from
 building it, measured against a real Turkish examination report held locally and never committed:
 
-- Simple fonts were being decoded as Latin-1. Turkish clinical PDFs are Windows-1254. Fixing that
-  plus reading Form XObjects took extracted page text from 48 to 1,852 characters, correctly
-  decoded Turkish letters from 0 to 133, and page-level spans from 1 to 13.
+- **Reading Form XObjects** took extracted page text from 48 to 1,852 characters, correctly decoded
+  Turkish letters from 0 to 133, and page-level spans from 1 to 13. Simple fonts were separately
+  found to be decoding as Latin-1 where Turkish clinical PDFs are Windows-1254, and that is fixed
+  and unit-tested, but it deserves no credit for those numbers: the sample document resolves every
+  glyph through `/ToUnicode` CMaps and never reaches the simple-font fallback, measured at zero hits
+  with a counter. It could not have moved a span count anyway, because digits are identical in both
+  code pages and the six divergent positions are letters, which only matter to name detection. An
+  earlier revision of this line credited the code page, which was two changes landing together and
+  one of them sounding like the explanation.
 - A page with both a text layer *and* images used to be masked, verified, and reported as a
   success with every pixel byte-identical. That is the common shape of hospital output, and a QR
   code carrying the protokol number is a direct identifier. Such a page is now **refused by
@@ -180,19 +186,54 @@ One script, run after a clone rather than piped from a URL, because a pipe from 
 operator to trust bytes they have not read on a machine that is about to process clinical text.
 
 ```bash
-git clone https://github.com/ArioMoniri/PIIMa.git && cd PIIMa
-./scripts/server-setup.sh
+git clone https://github.com/ArioMoniri/PIIMa.git && cd PIIMa && ./scripts/server-setup.sh
 ```
 
-Five steps: report prerequisites (never install them), install the PHI pre-commit gate first
-because it is the only step whose absence is silent, add the panel toolchain if it is wanted,
-`just build-all`, then `just check` and `just test-airgapped` to prove the thing rather than
-assert it. It starts no listener. Bringing a service up is a separate deliberate act:
+`git clone` makes its own `PIIMa/` directory and everything lives inside it: the Rust build in
+`target/`, the Python interpreter in `.venv/`, the logs in `logs/`. Nothing is installed system-wide
+and nothing outside the checkout is touched.
+
+Six steps: report prerequisites and refuse on a Python older than 3.10 (never install anything),
+install the PHI pre-commit gate first because it is the only step whose absence is silent, build
+`.venv/` and pin the Python dependencies into it, add the panel toolchain if it is wanted,
+`just build-all`, then `just check` and `just test-airgapped` to prove the thing rather than assert
+it. Safe to run twice: every step checks whether its work is already current and says so.
+
+**It starts no listener.** Bringing surfaces up is a separate deliberate act, and on a server it is
+this one:
+
+```bash
+just up          # all three surfaces, detached, one tmux window each
+just status      # state, pid, mechanism, port, log size, per surface
+just logs        # tail
+just down        # stop, and verify with lsof that every port is actually free
+```
+
+`up` puts each surface in its own window of a tmux session named `deid-tr`, so you can
+`tmux attach -t deid-tr` and watch one without touching the others (`Ctrl-b d` detaches without
+killing anything). Where tmux is not installed it falls back to `nohup` plus a pidfile and says so
+rather than pretending. Either way the surfaces survive the SSH connection dropping, which the
+foreground recipes below do not.
+
+| surface | port | what |
+|---|---|---|
+| `serve` | 8787 | `deid-serve`, the HTTP service |
+| `panel` | 8722 | the vanilla panel, no build step |
+| `panel-app` | 8723 | the React panel |
+
+Reach them from your laptop over SSH. No exposure, no TLS to terminate, no bearer token:
+
+```bash
+ssh -N -L 8787:127.0.0.1:8787 -L 8722:127.0.0.1:8722 -L 8723:127.0.0.1:8723 you@server
+```
+
+The foreground equivalents are still there for watching one surface while you work on it:
 
 ```bash
 just deploy-check      # bind posture, token, TLS, and which layers are actually live
 just deploy-local      # deid-serve on 127.0.0.1:8787
-just serve-panel       # the browser panel on 127.0.0.1:8722
+just serve-panel       # the vanilla panel on 127.0.0.1:8722
+just serve-panel-app   # the React panel on 127.0.0.1:8723
 just register-mcp      # prints the MCP client config block, and never writes it
 ```
 
@@ -430,8 +471,12 @@ The hook refused the commit and reported the line number *without* printing the 
 ```bash
 git clone https://github.com/ArioMoniri/PIIMa.git && cd PIIMa
 just install-hooks     # first, it is the PHI gate
+just venv              # .venv/ with pinned deps; the Python recipes refuse without it
 cargo build --workspace
 ```
+
+Or skip all three and run `./scripts/server-setup.sh`, which does them in order and verifies the
+result.
 
 ```bash
 just check             # hooks + invariant guards + fmt + clippy -D warnings + tests + eval
@@ -445,7 +490,7 @@ just test-hooks        # 263 guard cases
 
 ```console
 $ cargo test --workspace
-# 34 suites, summed: 950 passed; 0 failed
+# 34 suites, summed: 952 passed; 0 failed
 
 $ python3 -m pytest tests/ eval/ -q
 156 passed in 11.26s

@@ -47,7 +47,11 @@ readonly VENV_PY=".venv/bin/python"
 # kept as three functions over one list rather than one table because a bash 3.2
 # associative array does not exist on macOS, and this repo is developed there and
 # deployed on Linux.
-readonly SURFACES="serve panel"
+# WHY the React panel is here and not only in `just serve-panel-app`: it is the
+# surface an operator actually shows someone, and it was the one surface that
+# could not survive an SSH drop. A better UI reachable only from a foreground
+# recipe is a worse UI in practice.
+readonly SURFACES="serve panel panel-app"
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
@@ -61,6 +65,7 @@ surface_port() {
     case "$1" in
         serve) echo 8787 ;;
         panel) echo 8722 ;;
+        panel-app) echo 8723 ;;
         *) fail "unknown surface: $1"; exit 2 ;;
     esac
 }
@@ -68,7 +73,8 @@ surface_port() {
 surface_what() {
     case "$1" in
         serve) echo "deid-serve, the HTTP de-identification service" ;;
-        panel) echo "the browser panel, static files only" ;;
+        panel) echo "the vanilla browser panel, static files only" ;;
+        panel-app) echo "the React panel, static build output" ;;
         *) fail "unknown surface: $1"; exit 2 ;;
     esac
 }
@@ -90,6 +96,15 @@ surface_cmd() {
                 "$(printf %q "${REPO}/${VENV_PY}")" \
                 "$(printf %q "${REPO}/scripts/panel_server.py")" \
                 "$(printf %q "${REPO}/bindings/wasm")"
+            ;;
+        panel-app)
+            # Serves the BUILT bundle, never the Vite dev server: a dev server
+            # opens a websocket for hot reload, which is a live connection out of
+            # a page whose whole claim is that it makes none.
+            printf '%s %s --port 8723 --directory %s --page index.html' \
+                "$(printf %q "${REPO}/${VENV_PY}")" \
+                "$(printf %q "${REPO}/scripts/panel_server.py")" \
+                "$(printf %q "${REPO}/bindings/panel-app/dist")"
             ;;
         *) fail "unknown surface: $1"; exit 2 ;;
     esac
@@ -116,6 +131,18 @@ surface_preflight() {
             if [ ! -d "bindings/wasm/pkg-web" ]; then
                 fail "up: bindings/wasm/pkg-web does not exist, so the panel would load nothing."
                 fail "    fix: just build-wasm"
+                return 1
+            fi
+            ;;
+        panel-app)
+            if [ ! -x "${VENV_PY}" ]; then
+                fail "up: ${VENV_PY} does not exist, so the React panel has no server."
+                fail "    fix: just venv     (or: ./scripts/server-setup.sh)"
+                return 1
+            fi
+            if [ ! -f "bindings/panel-app/dist/index.html" ]; then
+                fail "up: bindings/panel-app/dist is not built, so there is nothing to serve."
+                fail "    fix: just build-panel-app     (needs npm)"
                 return 1
             fi
             ;;
@@ -297,7 +324,7 @@ cmd_up() {
     note "stop:    just down"
     echo
     note "Loopback only. From your laptop:"
-    note "  ssh -N -L 8787:127.0.0.1:8787 -L 8722:127.0.0.1:8722 YOU@THIS-SERVER"
+    note "  ssh -N -L 8787:127.0.0.1:8787 -L 8722:127.0.0.1:8722 -L 8723:127.0.0.1:8723 YOU@THIS-SERVER"
     echo
     note "THIS BUILD MASKS NO NAMES: L2 has no trained model and no weights ship, so"
     note "patient, clinician and relative names pass through untouched. 'just deploy-check'"
@@ -500,7 +527,8 @@ scripts/surfaces.sh <command> [surface...]
   status                       what is running, under which mechanism, on which port
   logs    [surface] [-f]       tail the persisted logs
 
-Surfaces: serve (deid-serve, 127.0.0.1:8787), panel (browser panel, 127.0.0.1:8722).
+Surfaces: serve (deid-serve, 127.0.0.1:8787), panel (vanilla, 127.0.0.1:8722),
+          panel-app (React, 127.0.0.1:8723). Each gets its own tmux window.
 Both are loopback only. Reach them over an SSH tunnel; see docs/DEPLOY.md.
 USAGE
 }
