@@ -1,0 +1,412 @@
+# Label map: ytu-ce-cosmos/modernbert-tr-pii-ner  ->  eval/schema.yaml
+#
+# WHAT THIS FILE IS. A third-party token classifier emits ITS label set, not
+# ours. Scoring it against `eval/schema.yaml` requires a translation, and that
+# translation is a set of judgement calls that change the reported numbers. So
+# it lives here as DATA, with the reasoning attached to each entry, rather than
+# as a dict literal inside a scorer. A second checkpoint with a different label
+# set is a new file in this directory and no code change.
+#
+# WHAT THIS FILE IS NOT. It is not evidence that anything works. No weights for
+# this checkpoint have been fetched, no inference has been run, and no number in
+# this repository has moved because this file exists. Until a measured run
+# lands, deid-tr masks ZERO names. `status: unmeasured` below says so
+# machine-readably, and the loader carries it into any artifact that quotes it.
+#
+# SOURCE OF THE LABEL SET. The 25 entity types below are the `id2label` values
+# of the published checkpoint config (51 BIO labels: B- and I- per type, plus
+# O). BIO prefixes are stripped by the loader, not enumerated here -- a map that
+# listed `B-TCKN` and `I-TCKN` separately would silently accept a checkpoint
+# that had dropped one of them.
+#
+# THE THREE POLICIES.
+#   exact     - one source label, one schema id. The ordinary case.
+#   any_of    - one source label, several schema ids that our schema
+#               distinguishes and the model does not. See KISI_AD_SOYAD.
+#   unmapped  - no schema id. An EXPLICIT null, never an omission: the loader
+#               rejects an entry with no `targets` key, so "we forgot" and "we
+#               decided not to" cannot look the same on disk.
+#
+# I2 HOLDS THROUGHOUT. Nothing here lowers a recall floor. `any_of` credits a
+# match to the GOLD span's own label, so every entity type is still measured
+# against its own threshold in eval/thresholds.yaml, and a name this model
+# misses is still a miss.
+
+meta:
+  map_version: "1.0.0"
+  source_model: "ytu-ce-cosmos/modernbert-tr-pii-ner"
+  source_scheme: "BIO"
+  source_label_count: 25
+  source_bio_label_count: 51
+  schema_file: "eval/schema.yaml"
+  # UNMEASURED. No weights on disk, no inference run, no eval artifact.
+  # Anything reporting from this map must reproduce this word.
+  status: "unmeasured"
+
+labels:
+
+  # ---------------------------------------------------------------------------
+  # THE ONE-TO-MANY NAME PROBLEM. This is the decision this file exists for.
+  # ---------------------------------------------------------------------------
+  - source: KISI_AD_SOYAD
+    targets: [PATIENT_NAME, CLINICIAN_NAME, RELATIVE_NAME]
+    match_policy: any_of
+    scored: true
+    rationale: |
+      This model has ONE person-name label. Our schema has three, because whose
+      name it is changes what a surrogate must preserve (L5) and what a re-ID
+      attack can do with it (L6). The model never claimed to make that
+      distinction, so scoring must neither demand it nor pretend it was made.
+
+      Three options were on the table.
+
+      (a) Map to the most conservative single target, e.g. PATIENT_NAME.
+      REJECTED, and it is the worst of the three rather than the safest. The
+      harness matches on `gold.label == pred.label`; a correctly located span
+      over `Op. Dr. Emre Şahin` labelled PATIENT_NAME scores a MISS against
+      CLINICIAN_NAME and a FALSE POSITIVE against PATIENT_NAME. One correct
+      detection becomes two errors. On a corpus where clinician and relative
+      names are common this reports a recall number that is a fact about our
+      label taxonomy, not about the model, and it reports it LOW -- which under
+      I2 is the direction that gets a real detector rejected for nothing.
+
+      (b) Score the prediction against all three. REJECTED: one predicted span
+      credited to three gold spans is one prediction counted three times, which
+      is exactly the recall inflation the harness's one-to-one matching was
+      written to prevent (see `match_spans`: "one huge predicted span covering
+      the whole note would match every gold span in it").
+
+      (c) CHOSEN: `any_of` with one-to-one consumption. A KISI_AD_SOYAD
+      prediction is eligible to match a gold span carrying ANY of the three
+      labels, and once it matches one it is consumed and cannot match another.
+      The true positive is credited to THE GOLD SPAN'S OWN LABEL, so
+      PATIENT_NAME, CLINICIAN_NAME and RELATIVE_NAME each keep their own 0.98
+      floor and none is relaxed. A KISI_AD_SOYAD prediction that overlaps no
+      name gold span is one false positive, once.
+
+      What this deliberately does NOT do: it does not let the model claim
+      credit for a distinction it cannot make, and it does not report the
+      name-role assignment as solved. Role assignment is L2-ensemble and L4
+      work; a checkpoint scored through `any_of` has demonstrated name
+      DETECTION only, and any card quoting these numbers must say that.
+
+      HONESTY: the eval harness does not implement `any_of` today. This entry
+      is a specification the harness must grow to satisfy, and until it does,
+      loading this map gives a scorer no way to use this label. That gap is
+      recorded rather than hidden, because a map that silently degraded to
+      option (a) at runtime would produce exactly the misleading number
+      option (a) was rejected for.
+
+  # The same one-to-many shape, and the same resolution, for addresses.
+  # Recorded here rather than treated as routine because it is a second
+  # judgement call, not a consequence of the first.
+  - source: ADRES
+    targets: [ADDRESS_STREET, ADDRESS_CITY, ADDRESS_DISTRICT]
+    match_policy: any_of
+    scored: true
+    rationale: |
+      One ADRES label spans what our schema splits three ways by how far it
+      narrows the population: street (0.98), district (0.96), city (0.95).
+      Collapsing to ADDRESS_STREET would produce the same miss-plus-false-
+      positive double penalty as name option (a) on every bare city mention,
+      of which Turkish notes have many for legitimate clinical reasons
+      (referring centre, endemic exposure). `any_of` with one-to-one
+      consumption, credited to the gold span's own label, keeps all three
+      floors intact.
+
+      A real difference from the name case, stated because it affects reading
+      the result: address components nest, so a single ADRES span may cover a
+      street, a district and a city that gold annotated as three spans. It will
+      match one of them and the other two will count as misses. That
+      UNDERSTATES the model, and understating is the direction I2 tolerates;
+      the alternative, splitting one prediction into three, is inventing spans
+      the model did not emit.
+
+  # ---------------------------------------------------------------------------
+  # ORDINARY ONE-TO-ONE DIRECT IDENTIFIERS.
+  # ---------------------------------------------------------------------------
+  - source: TCKN
+    targets: [TCKN]
+    match_policy: exact
+    scored: true
+    rationale: |
+      Same entity, same definition. Note for whoever reads the resulting
+      numbers: TCKN is `detector: rules` in our schema and is checksum-
+      validated at L1 with precision floor 1.000. A token classifier's TCKN
+      predictions are NOT checksum-validated, so they must not be fed into
+      `checksum_id_precision` (D-030) -- they are ordinary NER spans that
+      happen to carry a checksum-validatable label.
+
+  - source: VKN
+    targets: [VKN]
+    match_policy: exact
+    scored: true
+    rationale: "Same entity. The checksum caveat under TCKN applies identically."
+
+  - source: TELEFON
+    targets: [PHONE]
+    match_policy: exact
+    scored: true
+    rationale: "Same entity across all Turkish surface forms (+90 5XX, 0(5XX), 05XX, landline)."
+
+  - source: EMAIL
+    targets: [EMAIL]
+    match_policy: exact
+    scored: true
+    rationale: "Same entity."
+
+  - source: IP_ADRES
+    targets: [IP_ADDRESS]
+    match_policy: exact
+    scored: true
+    rationale: "Same entity, IPv4 and IPv6 alike."
+
+  - source: POSTA_KODU
+    targets: [POSTAL_CODE]
+    match_policy: exact
+    scored: true
+    rationale: "Same entity: Turkish five-digit posta kodu."
+
+  - source: PLAKA
+    targets: [LICENSE_PLATE]
+    match_policy: exact
+    scored: true
+    rationale: "Same entity: Turkish vehicle plate."
+
+  - source: IBAN_TR
+    targets: [IBAN]
+    match_policy: exact
+    scored: true
+    rationale: |
+      Same entity. Our IBAN entry is already TR-specific (26 characters,
+      mod-97), so the TR qualifier in their name adds no distinction. Checksum
+      caveat under TCKN applies.
+
+  - source: PASAPORT_NO
+    targets: [PASSPORT_NO]
+    match_policy: exact
+    scored: true
+    rationale: "Same entity."
+
+  - source: DOGUM_TARIHI
+    targets: [DATE_BIRTH]
+    match_policy: exact
+    scored: true
+    rationale: |
+      Their only dated-event label is birth, and ours carries the highest date
+      floor (0.98) because birth date plus district plus sex is the classic
+      re-identification triple. One-to-one, no ambiguity. Our four other date
+      roles have no source label at all, which is a coverage gap in the
+      checkpoint, not a mapping problem: DATE_ADMISSION, DATE_DISCHARGE,
+      DATE_DEATH and role-less DATE gold spans will simply go unpredicted and
+      score as misses. That is the honest reading.
+
+  - source: KART_SON_KULLANMA
+    targets: [DATE]
+    match_policy: exact
+    scored: true
+    rationale: |
+      A payment-card expiry date. It is a located, calendar-valid date that
+      asserts no patient role, which is precisely what the role-less DATE entry
+      was created for. Mapping it to any of the four role-bearing date labels
+      would assert a role the span does not have; dropping it would let a real
+      date-shaped identifier fragment go unmeasured. The cost is bounded and
+      one-directional: if our gold does not annotate card expiries, these
+      predictions land as DATE false positives, denting precision and never
+      recall, which is the trade I2 prescribes.
+
+  # ---------------------------------------------------------------------------
+  # MANY-TO-ONE. Two source labels share one schema id. Each carries
+  # `shared_target_reason`; the loader rejects an unexplained collision.
+  # ---------------------------------------------------------------------------
+  - source: KIMLIK_BELGE_NO
+    targets: [CERTIFICATE_NO]
+    match_policy: exact
+    scored: true
+    shared_target_reason: |
+      Our schema does not subdivide certificate and licence numbers; both
+      identity-card serials and driving-licence numbers are HIPAA
+      "Certificate/license numbers" and both are CERTIFICATE_NO here. Many-to-
+      one is safe in a way one-to-many is not: two source labels pointing at
+      one target still produce distinct spans over distinct text, so nothing is
+      double counted and no floor is relaxed. The only loss is that the eval
+      report cannot say WHICH kind of certificate the model got right, and
+      neither can our schema, so nothing is lost that we could have reported.
+    rationale: |
+      The Turkish identity-card serial (kimlik belge / seri no) is a document
+      number distinct from the TCKN printed on the same card. Mapping it to
+      TCKN would be wrong and would corrupt a checksum-floored label with
+      spans no checksum can validate.
+
+  - source: SURUCU_BELGESI_NO
+    targets: [CERTIFICATE_NO]
+    match_policy: exact
+    scored: true
+    shared_target_reason: "See KIMLIK_BELGE_NO. Driving licence number; CERTIFICATE_NO names it explicitly."
+    rationale: "Direct match to the CERTIFICATE_NO description, which lists driving licence first."
+
+  - source: HESAP_NO
+    targets: [ACCOUNT_NO]
+    match_policy: exact
+    scored: true
+    shared_target_reason: |
+      Shares ACCOUNT_NO with KART_NO. Our schema has one non-IBAN financial
+      account label; splitting card from account would be inventing a schema
+      entry to fit a third party's taxonomy, which is the tail wagging the dog.
+      Many-to-one, so no double counting.
+    rationale: "Bank or billing account number that is not an IBAN -- ACCOUNT_NO verbatim."
+
+  - source: KART_NO
+    targets: [ACCOUNT_NO]
+    match_policy: exact
+    scored: true
+    shared_target_reason: "See HESAP_NO. A payment card number is an account number under HIPAA's account-number category."
+    rationale: |
+      A card number identifies the account holder and belongs in the masked
+      set. Mapped rather than dropped, because a PAN left in a clinical note is
+      a direct identifier by any reading.
+
+  # ---------------------------------------------------------------------------
+  # THE ORGANISATION CASE.
+  # ---------------------------------------------------------------------------
+  - source: TUZEL_KISI
+    targets: [FACILITY_NAME]
+    match_policy: exact
+    scored: true
+    rationale: |
+      TUZEL_KISI is any legal person -- a company, an association, a hospital.
+      Our schema has FACILITY_NAME (class A, scored, care settings) and
+      EMPLOYER_ROLE (class B, quasi, not F1-scored, employers and institutional
+      roles). A TUZEL_KISI span could be either.
+
+      Mapped to FACILITY_NAME because that is the direction whose cost is
+      precision rather than recall: a non-care organisation predicted as
+      FACILITY_NAME is a false positive, while routing organisations into
+      EMPLOYER_ROLE would make them invisible to the F1-scored set and hand
+      them to a gate that does not score them at all. The reading that follows
+      is stated rather than discovered: FACILITY_NAME precision from this
+      checkpoint is a FLOOR, not an estimate, because an unknown share of its
+      false positives are correct organisation detections our schema files
+      elsewhere.
+
+  # ---------------------------------------------------------------------------
+  # MAPPED BUT NOT F1-SCORED. See ADR D-046.
+  # ---------------------------------------------------------------------------
+  - source: MESLEK_UNVAN
+    targets: [EMPLOYER_ROLE]
+    match_policy: exact
+    scored: false
+    scoring_note: "Class B quasi-identifier. Validated by the L6 re-ID red team, never by F1 (D-008). See D-046."
+    rationale: |
+      Occupation / job title. Our EMPLOYER_ROLE is the right semantic target
+      and it is a CLASS B quasi-identifier: `scored_by_f1: false`, no
+      recall_threshold, no precision_threshold, validated only by the
+      contextual re-ID rate the L6 red team produces.
+
+      A token-level prediction for a class B label is a situation the schema
+      did not anticipate. The schema's own reasoning for refusing F1 here is
+      that quasi-identifiers are MEANINGS with no enumerable denominator --
+      "Merkez Bankası'nda çalışıyor" is a judgement, not a span type. A bare
+      job title like `öğretmen` is narrower than that and arguably IS
+      enumerable, which is a real argument for scoring it.
+
+      That argument is NOT settled here, and `scored: false` is the point of
+      this entry. Quietly setting it true would reverse D-008 as a side effect
+      of adding a YAML file, and would put a number in a model card that no ADR
+      authorises. The loader ENFORCES this: any entry whose target is a quasi
+      id must carry `scored: false`, so promoting it requires editing the
+      loader's rule and therefore arguing for it.
+
+      D-046 records the proposal and leaves the current gate untouched: today,
+      predictions carrying this label contribute to the red-team input and to
+      nothing that is gated.
+
+  # ---------------------------------------------------------------------------
+  # EXPLICITLY UNMAPPED. `targets: []` is a decision on the record, not an
+  # omission -- the loader rejects a missing `targets` key outright.
+  # ---------------------------------------------------------------------------
+  - source: SAGLIK_BILGISI
+    targets: []
+    match_policy: unmapped
+    scored: false
+    needs_human_decision: true
+    rationale: |
+      Health information. Under KVKK (Law No. 6698) health data is a SPECIAL
+      CATEGORY, so this is not a label we can wave through -- and it is also
+      not a label we can act on without someone deciding what it means for a
+      clinical de-identifier.
+
+      THE COLLISION, stated plainly. Our class C medical allowlist exists to
+      guarantee that `carcinoma`, `pneumonia`, `hepaticus` and `metformin` are
+      NEVER masked, because masking them destroys the clinical note; the
+      allowlist has its own hard gate (fp_rate_max <= 0.005). SAGLIK_BILGISI
+      covers, by its own definition, exactly that vocabulary. Mapping it to any
+      masking label would put a source label in direct opposition to a shipped
+      gate: every diagnosis in the corpus becomes a masked span, the allowlist
+      false-positive rate goes through its ceiling, and the deliverable stops
+      being a clinical note.
+
+      Mapping it to the allowlist categories instead is equally wrong in the
+      other direction: those are a NEGATIVE set scored as false positives, not
+      a prediction target, and a "correct" SAGLIK_BILGISI prediction is not
+      evidence of anything the allowlist measures.
+
+      So: unmapped, and flagged. `needs_human_decision: true` means the honest
+      answer requires a policy call this file cannot make -- whether deid-tr
+      recognises a KVKK special-category label at all, and if so whether it
+      belongs in a fourth class scored by neither recall nor false-positive
+      rate. Predictions carrying this label are dropped and COUNTED, so the
+      eval artifact reports how much of the model's output we discarded rather
+      than pretending it emitted less than it did.
+
+  - source: DIN_ETNIK_SIYASI_TERIM
+    targets: []
+    match_policy: unmapped
+    scored: false
+    rationale: |
+      Religious, ethnic and political terms. A KVKK special category with no
+      analogue in our schema, and inventing an entry to receive it would be
+      adding a scored label to the vocabulary through a third party's taxonomy
+      rather than through the schema's own reasoning. Same disposition as
+      SAGLIK_BILGISI minus the allowlist collision: dropped and counted.
+
+  - source: KART_CVV
+    targets: []
+    match_policy: unmapped
+    scored: false
+    rationale: |
+      A card verification value identifies nobody. It is a secret, not an
+      identifier: three digits with no link to a person absent the card number,
+      which is mapped separately as ACCOUNT_NO. No clinical analogue and no
+      Safe Harbor category. Unmapped rather than forced into OTHER_UNIQUE_ID,
+      which would make our catch-all a dumping ground and put a meaningless
+      denominator under a 0.98 floor.
+
+  - source: MERSIS_NO
+    targets: []
+    match_policy: unmapped
+    scored: false
+    rationale: |
+      Central registry number of a Turkish legal entity. It identifies a
+      COMPANY, not a natural person, and no chain from it to a patient exists
+      in a clinical note. No clinical analogue.
+
+  - source: ETTN_EFATURA_ID
+    targets: []
+    match_policy: unmapped
+    scored: false
+    rationale: |
+      The UUID of a Turkish electronic invoice. An artefact of the e-invoicing
+      system rather than an identifier of a patient; it appears in billing
+      records, not in clinical narrative. No clinical analogue. If a future
+      corpus shows these carrying patient linkage, the answer is a schema entry
+      argued for in an ADR, not a quiet remap here.
+
+  - source: SWIFT_BIC
+    targets: []
+    match_policy: unmapped
+    scored: false
+    rationale: |
+      A bank identifier code names a BANK. It is the same string for every
+      customer of that branch, so it cannot narrow a population of patients.
+      No clinical analogue.

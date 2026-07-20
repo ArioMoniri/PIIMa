@@ -26,6 +26,8 @@ use crate::span::{union_widest, DetectorId, Merged, Span};
 
 use super::align::{Normalized, TokenSpan};
 use super::bioes::LabelSet;
+use super::scheme::BioScheme;
+use super::words::first_piece_rows;
 use super::NerError;
 
 /// A tokenized document: the ids a model consumes and where each id came from.
@@ -85,19 +87,109 @@ impl Tokenized {
 pub struct Member {
     detector: Box<dyn Detector>,
     labels: LabelSet,
+    /// `None` when the checkpoint already emits BIOES in `labels` column order.
+    scheme: Option<BioScheme>,
+    pieces: PieceLabels,
+}
+
+/// Which model tokens of a word carry a label the fine-tune supervised.
+///
+/// A PROPERTY OF THE CHECKPOINT, not of the tokenizer and not of the ensemble.
+/// A fine-tune done with `is_split_into_words` labels the first WordPiece of
+/// each word and masks the rest with `-100`, so the continuation rows are
+/// unsupervised output that must not reach the decode; a fine-tune done over
+/// raw subwords labels all of them. Getting this wrong in either direction is
+/// silent: the decode still produces well-formed chunks, they are just derived
+/// from rows the training never constrained.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PieceLabels {
+    /// Every model token's row is the model's answer for that token.
+    #[default]
+    EveryPiece,
+    /// Only the first piece of each word was supervised; the rest inherit it.
+    /// See [`super::words`].
+    FirstPieceOnly,
 }
 
 impl Member {
-    /// Pair a detector with the tag inventory its logit columns mean.
+    /// Pair a detector with the BIOES tag inventory its logit columns mean.
     #[must_use]
     pub fn new(detector: Box<dyn Detector>, labels: LabelSet) -> Self {
-        Self { detector, labels }
+        Self {
+            detector,
+            labels,
+            scheme: None,
+            pieces: PieceLabels::EveryPiece,
+        }
     }
 
-    /// The tag inventory this member's columns are indexed by.
+    /// Pair a detector with a BIO head, converting its columns on the way in.
+    ///
+    /// The label set is DERIVED from the scheme rather than accepted alongside
+    /// it, because the two must agree exactly and a caller who could pass both
+    /// is a caller who can pass a pair that does not -- which decodes one
+    /// checkpoint's columns against another's inventory and produces confident,
+    /// well-formed, entirely wrong labels.
+    #[must_use]
+    pub fn bio(detector: Box<dyn Detector>, scheme: BioScheme, pieces: PieceLabels) -> Self {
+        Self {
+            detector,
+            labels: scheme.labels().clone(),
+            scheme: Some(scheme),
+            pieces,
+        }
+    }
+
+    /// The tag inventory this member's DECODED columns are indexed by.
     #[must_use]
     pub fn labels(&self) -> &LabelSet {
         &self.labels
+    }
+
+    /// The BIO conversion, when the checkpoint has a BIO head.
+    #[must_use]
+    pub fn scheme(&self) -> Option<&BioScheme> {
+        self.scheme.as_ref()
+    }
+
+    /// Which of a word's pieces this checkpoint supervised.
+    #[must_use]
+    pub fn pieces(&self) -> PieceLabels {
+        self.pieces
+    }
+
+    /// Raw checkpoint logits, in the column space and at the granularity the
+    /// decode expects, with the spans each surviving row belongs to.
+    ///
+    /// RETURNS SPANS AS WELL AS ROWS because [`PieceLabels::FirstPieceOnly`]
+    /// changes the granularity: the decode then runs over words, and a chunk's
+    /// token indices index the returned spans rather than the tokenization the
+    /// caller started with. Handing back only the rows is how those two vectors
+    /// come to disagree, and a disagreement here anchors a span to the wrong
+    /// word.
+    ///
+    /// ORDER IS LOAD-BEARING. The reduction runs FIRST, on the checkpoint's own
+    /// columns, because that is the space in which "this row is the model's
+    /// answer for this token" is true. Widening afterwards converts only rows
+    /// the fine-tune actually supervised. Reversing the two would also make the
+    /// row-shape error a caller sees name the BIOES width rather than the
+    /// checkpoint's, which is the number they have to fix.
+    fn adapt(
+        &self,
+        spans: &[TokenSpan],
+        rows: Vec<Vec<f32>>,
+    ) -> Result<(Vec<TokenSpan>, Vec<Vec<f32>>), NerError> {
+        let (spans, rows) = match self.pieces {
+            PieceLabels::EveryPiece => (spans.to_vec(), rows),
+            PieceLabels::FirstPieceOnly => first_piece_rows(spans, &rows),
+        };
+        match &self.scheme {
+            None => Ok((spans, rows)),
+            Some(scheme) => {
+                let widened = scheme.widen(&rows)?;
+                Ok((spans, widened))
+            }
+        }
     }
 }
 
@@ -122,16 +214,37 @@ impl NerEnsemble {
     /// is refused rather than wrapped: a wrapped index would give two members
     /// the same identity and manufacture agreement between a model and itself.
     pub fn with_member(
-        mut self,
+        self,
         detector: Box<dyn Detector>,
         labels: LabelSet,
     ) -> Result<Self, NerError> {
+        self.push(Member::new(detector, labels))
+    }
+
+    /// Add one checkpoint whose head is BIO rather than BIOES.
+    ///
+    /// The conversion is [`BioScheme::widen`] and the reasoning for doing it on
+    /// logits rather than on tags is in [`super::scheme`]. `pieces` says whether
+    /// the fine-tune labelled every subword or only the first piece of each
+    /// word, which is the other half of what a published checkpoint's card
+    /// tells you and the other half of what silently mis-decodes if guessed.
+    pub fn with_bio_member(
+        self,
+        detector: Box<dyn Detector>,
+        scheme: BioScheme,
+        pieces: PieceLabels,
+    ) -> Result<Self, NerError> {
+        self.push(Member::bio(detector, scheme, pieces))
+    }
+
+    /// Append a member, refusing to overflow the detector id.
+    fn push(mut self, member: Member) -> Result<Self, NerError> {
         if u16::try_from(self.members.len()).is_err() {
             return Err(NerError::TooManyDetectors {
                 max: usize::from(u16::MAX) + 1,
             });
         }
-        self.members.push(Member::new(detector, labels));
+        self.members.push(member);
         Ok(self)
     }
 
@@ -215,11 +328,16 @@ impl NerEnsemble {
             });
         }
 
+        // The row count is checked on the RAW logits, before any adaptation:
+        // every adaptation preserves the row count, so a mismatch here is the
+        // checkpoint disagreeing with the tokenization rather than anything
+        // this crate did to the rows.
+        let (spans_for_decode, logits) = member.adapt(&tokenized.spans, logits)?;
         let decoded = member.labels.viterbi(&logits)?;
         let detector_id = DetectorId::Ner(index);
         let mut spans = Vec::new();
         for chunk in decoded.chunks() {
-            let Some(tokens) = tokenized.spans.get(chunk.first..=chunk.last) else {
+            let Some(tokens) = spans_for_decode.get(chunk.first..=chunk.last) else {
                 // Unreachable: chunk indices come from a decode over exactly
                 // `tokenized.len()` rows. Handled rather than indexed so the
                 // crate stays panic-free on every path (Definition of Done).
@@ -482,6 +600,161 @@ mod tests {
         assert_eq!(
             Tokenized::new(vec![1, 2, 3], vec![TokenSpan::special()]),
             Err(NerError::TokenSpanCount { ids: 3, spans: 1 })
+        );
+    }
+
+    #[test]
+    fn a_bio_checkpoint_over_word_pieces_masks_the_root_and_leaves_the_suffix() {
+        // THE END-TO-END STATEMENT OF THE CHECKPOINT CONTRACT, with canned
+        // logits and zero weights on disk. A cased WordPiece vocabulary
+        // fragments `Ayşe'nin` into four pieces; the fine-tune labelled only
+        // the first one; the head is BIO. All three facts are handled at once,
+        // and the span that comes out is `Ayşe` at ORIGINAL byte offsets.
+        use crate::detect::scheme::{BioScheme, BioTag};
+        use crate::detect::words::{word_piece_spans, words};
+
+        let scheme = BioScheme::new(vec![
+            BioTag::Outside,
+            BioTag::Begin(NAME),
+            BioTag::Inside(NAME),
+        ])
+        .expect("a three-column head");
+
+        let normalized = Normalized::new(DOC, Normalization::Identity);
+        let word_spans = words(normalized.text());
+        // `[CLS] Hasta Ay ##şe ' nin carcinoma ##'lı akciğer grafisi okundu . [SEP]`
+        let word_ids = [
+            None,
+            Some(0),
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(2),
+            Some(2),
+            Some(3),
+            Some(4),
+            Some(5),
+            None,
+        ];
+        let piece_spans = word_piece_spans(&word_spans, &word_ids).expect("word ids in range");
+        let ids: Vec<u32> = (0..piece_spans.len() as u32).collect();
+        let tokenized = Tokenized::new(ids, piece_spans).expect("parallel by construction");
+
+        // Column 1 (`B-PATIENT_NAME`) is shouted on the FIRST piece of the name
+        // only. Every continuation piece is given a loud `O`, which is exactly
+        // the unsupervised noise `FirstPieceOnly` exists to discard -- if it
+        // reached the decode, the name would not be tagged at all.
+        let mut logits = vec![vec![6.0_f32, 0.0, 0.0]; word_ids.len()];
+        logits[2] = vec![0.0, 6.0, 0.0];
+
+        let ensemble = NerEnsemble::new()
+            .with_bio_member(
+                Box::new(MockDetector::new(logits)),
+                scheme,
+                PieceLabels::FirstPieceOnly,
+            )
+            .expect("one member");
+
+        let spans = ensemble
+            .propose(&normalized, &tokenized)
+            .expect("proposal succeeds");
+        assert_eq!(spans.len(), 1, "one name, one span");
+        assert_eq!(
+            &DOC[spans[0].start()..spans[0].end()],
+            "Ayşe",
+            "the case suffix must be excluded and the offsets must be original-text bytes"
+        );
+        assert!(DOC.is_char_boundary(spans[0].start()));
+        assert!(DOC.is_char_boundary(spans[0].end()));
+        assert_eq!(spans[0].label(), NAME);
+    }
+
+    #[test]
+    fn piece_labels_is_not_a_cosmetic_setting() {
+        // The negative control. Same checkpoint, same tokenization, same
+        // logits, both settings -- and they differ, so the setting has to be
+        // read off the checkpoint's card rather than defaulted.
+        //
+        // The logits are the realistic shape for a head fine-tuned with `-100`
+        // on continuation pieces: every piece of the name scores `B-X`, because
+        // nothing ever taught the model to score them differently. Kept, that
+        // is FOUR spans over one word -- four audit entries and four surrogate
+        // lookups for one name. Reduced, it is one.
+        use crate::detect::scheme::{BioScheme, BioTag};
+        use crate::detect::words::{word_piece_spans, words};
+
+        let normalized = Normalized::new(DOC, Normalization::Identity);
+        let word_spans = words(normalized.text());
+        let word_ids = [None, Some(0), Some(1), Some(1), Some(1), Some(1)];
+        let piece_spans = word_piece_spans(&word_spans, &word_ids).expect("word ids");
+        let ids: Vec<u32> = (0..piece_spans.len() as u32).collect();
+        let tokenized = Tokenized::new(ids, piece_spans).expect("parallel");
+
+        let mut logits = vec![vec![6.0_f32, 0.0, 0.0]; word_ids.len()];
+        for row in logits.iter_mut().take(6).skip(2) {
+            *row = vec![0.0, 6.0, 0.0];
+        }
+
+        let count = |pieces: PieceLabels| {
+            let scheme = BioScheme::new(vec![
+                BioTag::Outside,
+                BioTag::Begin(NAME),
+                BioTag::Inside(NAME),
+            ])
+            .expect("scheme");
+            NerEnsemble::new()
+                .with_bio_member(Box::new(MockDetector::new(logits.clone())), scheme, pieces)
+                .expect("one member")
+                .propose(&normalized, &tokenized)
+                .expect("proposal succeeds")
+        };
+
+        let reduced = count(PieceLabels::FirstPieceOnly);
+        assert_eq!(reduced.len(), 1, "one word, one span");
+        assert_eq!(&DOC[reduced[0].start()..reduced[0].end()], "Ayşe");
+
+        let kept = count(PieceLabels::EveryPiece);
+        assert_eq!(
+            kept.len(),
+            4,
+            "every piece of the word proposed its own span"
+        );
+        // Not a leak -- the bytes are the same and `union_widest` collapses
+        // them -- but a different answer, which is the point of the control.
+        for span in &kept {
+            assert_eq!(&DOC[span.start()..span.end()], "Ayşe");
+        }
+    }
+
+    #[test]
+    fn a_bio_checkpoint_whose_row_is_the_wrong_width_names_the_checkpoints_width() {
+        use crate::detect::scheme::{BioScheme, BioTag};
+        let scheme = BioScheme::new(vec![
+            BioTag::Outside,
+            BioTag::Begin(NAME),
+            BioTag::Inside(NAME),
+        ])
+        .expect("scheme");
+        let normalized = Normalized::new(DOC, Normalization::Identity);
+        let tokenized = tokenize(DOC);
+        // Nine columns is the BIOES width for two entities -- exactly what a
+        // caller who forgot the conversion would send. It must be refused
+        // against the checkpoint's three, not accepted against the decode's.
+        let ensemble = NerEnsemble::new()
+            .with_bio_member(
+                Box::new(MockDetector::new(vec![vec![0.0; 9]; 7])),
+                scheme,
+                PieceLabels::FirstPieceOnly,
+            )
+            .expect("one member");
+        assert_eq!(
+            ensemble.propose(&normalized, &tokenized),
+            Err(NerError::LogitWidth {
+                row: 0,
+                actual: 9,
+                expected: 3,
+            })
         );
     }
 

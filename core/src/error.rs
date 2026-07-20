@@ -202,6 +202,10 @@ pub enum DetectionFailure {
     TokenSpanNotAligned,
     /// More ensemble members than a `DetectorId` can distinguish.
     TooManyDetectors,
+    /// A model token claimed a word index the word list does not have.
+    WordIndexOutOfRange,
+    /// A checkpoint declared an empty label inventory.
+    EmptyScheme,
 }
 
 impl core::fmt::Display for DetectionFailure {
@@ -213,6 +217,8 @@ impl core::fmt::Display for DetectionFailure {
             Self::TokenSpanCount => "token span count",
             Self::TokenSpanNotAligned => "token span not aligned",
             Self::TooManyDetectors => "too many detectors",
+            Self::WordIndexOutOfRange => "word index out of range",
+            Self::EmptyScheme => "empty label inventory",
         })
     }
 }

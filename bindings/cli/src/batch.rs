@@ -487,6 +487,7 @@ pub fn run(
     tier: Tier,
     opts: BatchOpts,
     l3: &crate::l3::L3Config,
+    l2: &crate::l2::L2Config,
     progress: &mut dyn Write,
 ) -> Result<Summary, BatchError> {
     if !input.is_dir() {
@@ -502,6 +503,7 @@ pub fn run(
         tier,
         opts: opts.mask,
         l3,
+        l2,
     })?;
 
     let mut manifest = std::fs::File::create(output.join(MANIFEST_NAME))
@@ -645,6 +647,7 @@ mod tests {
             Tier::SafeHarbor,
             opts,
             &crate::l3::L3Config::default(),
+            &crate::l2::L2Config::default(),
             &mut Vec::new(),
         )
         .expect("batch run")
@@ -925,6 +928,7 @@ mod tests {
                 Tier::SafeHarbor,
                 opts(),
                 &crate::l3::L3Config::default(),
+                &crate::l2::L2Config::default(),
                 &mut Vec::new(),
             );
             assert!(
@@ -944,6 +948,7 @@ mod tests {
             Tier::SafeHarbor,
             opts(),
             &crate::l3::L3Config::default(),
+            &crate::l2::L2Config::default(),
             &mut Vec::new(),
         );
         assert!(matches!(refused, Err(BatchError::NotADirectory)));
@@ -979,6 +984,7 @@ mod tests {
             Tier::SafeHarbor,
             opts(),
             &crate::l3::L3Config::default(),
+            &crate::l2::L2Config::default(),
             &mut progress,
         )
         .expect("run");

@@ -49,6 +49,19 @@ deid-tr-files = { path = "../files" }
 # artifact a hospital installs could construct it. A tested component wired to
 # nothing is not a feature.
 deid-tr-llm = { path = "../llm" }
+# The L2 model runtime seam. Admitted on the same terms as `deid-tr-llm`:
+# `bindings/ort` declares exactly `deid-tr-core` and `thiserror`, has no HTTP
+# client and no hub resolver, and is a PATH dependency with no registry crates
+# of its own -- so it opens no socket and forces no resolve, and
+# `just test-airgapped` stays green.
+#
+# It is admitted BEFORE the ONNX Runtime itself is, deliberately. What crosses
+# this line today is the checkpoint-directory resolution, the label inventory
+# and the BIO conversion -- everything that can be validated and tested with no
+# weights on disk. `deid mask --l2-model DIR` therefore refuses with a message
+# naming the directory and the flag instead of ignoring the flag, which is the
+# behaviour an operator can act on. It masks nothing through L2 and says so.
+deid-tr-ort = { path = "../ort" }
 # CSPRNG for the L5 salt. `core/` cannot generate one -- it performs no I/O
 # (I1), so it has no route to an operating-system entropy source and a salt it
 # invented from a counter would be a salt an attacker can guess. Supplying the

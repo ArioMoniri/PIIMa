@@ -113,6 +113,8 @@ impl From<NerError> for Error {
             NerError::TokenSpanCount { .. } => DetectionFailure::TokenSpanCount,
             NerError::TokenSpanNotAligned { .. } => DetectionFailure::TokenSpanNotAligned,
             NerError::TooManyDetectors { .. } => DetectionFailure::TooManyDetectors,
+            NerError::WordIndexOutOfRange { .. } => DetectionFailure::WordIndexOutOfRange,
+            NerError::EmptyScheme => DetectionFailure::EmptyScheme,
         };
         Self::DetectionFailed { kind }
     }

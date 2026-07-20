@@ -410,6 +410,19 @@ test-airgapped: _venv
 gate-tokenizer: _venv
     {{python}} scripts/gate_tokenizer.py
 
+# WHY a separate recipe rather than a flag on the one above: this is the path a hospital host
+# and CI take. It reads a checkpoint directory the operator already fetched and touches no
+# network, so it is the only spelling of the gate that can run air-gapped -- and the gate has
+# to be runnable exactly where the model is, or it becomes a thing a maintainer remembers to do.
+# DIR is the same directory `deid mask --l2-model DIR` takes.
+# Gate a LOCAL tokenizer directory. No network.
+gate-tokenizer-local dir: _venv
+    {{python}} scripts/gate_tokenizer.py --local-only "{{dir}}"
+
+# Prove offline that the gate rejects what it must reject. Runs against stub tokenizers.
+gate-tokenizer-self-test: _venv
+    {{python}} scripts/gate_tokenizer.py --self-test
+
 # WHY it runs the PIPELINE masker: this recipe answers "what does the real product leak", and
 # only that question has a gate behind it. It used to run the ORACLE masker, which is a
 # gold-derived perfect masker, and eval/harness.py read the resulting file whatever detector it

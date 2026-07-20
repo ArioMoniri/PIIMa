@@ -108,6 +108,7 @@ dependencies = [
  "deid-tr-core",
  "deid-tr-files",
  "deid-tr-llm",
+ "deid-tr-ort",
  "getrandom 0.3.4",
  "minisign",
  "minisign-verify",

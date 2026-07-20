@@ -10,6 +10,12 @@
 //! - [`align`] -- the offset map. Tokenizer offsets are never trusted; they are
 //!   re-anchored through an index built at normalisation time.
 //! - [`ensemble`] -- the union. A span one model proposed always survives.
+//! - [`scheme`] -- BIO to BIOES. Published checkpoints are BIO and this crate
+//!   decodes BIOES; the conversion is explicit, on logits, and tested.
+//! - [`words`] -- the `is_split_into_words` path. A model token's span is its
+//!   WORD's span, computed here from the text rather than read back from the
+//!   tokenizer, and a word decodes from the first WordPiece the fine-tune
+//!   actually put a label on.
 //!
 //! WHAT IS NOT HERE, AND WHY. No inference runtime, no tokenizer vocabulary, no
 //! weights, no file access. `core/` is structurally incapable of I/O or network
@@ -24,10 +30,14 @@
 pub mod align;
 pub mod bioes;
 pub mod ensemble;
+pub mod scheme;
+pub mod words;
 
 pub use align::{trim_to_entity, Normalization, Normalized, TokenSpan};
 pub use bioes::{Chunk, Decoded, LabelSet, Tag};
-pub use ensemble::{Member, NerEnsemble, Tokenized};
+pub use ensemble::{Member, NerEnsemble, PieceLabels, Tokenized};
+pub use scheme::{BioScheme, BioTag};
+pub use words::{first_piece_rows, word_piece_spans, words};
 
 use crate::pipeline::Detector;
 
@@ -86,6 +96,19 @@ pub enum NerError {
         end: usize,
         len: usize,
     },
+
+    /// A model token claims a word index the word list does not have, so the
+    /// tokenizer was handed a different word list than the one the spans were
+    /// built from. Refused rather than clamped: a clamp anchors the span to the
+    /// last word of the note, which looks like a detection.
+    #[error("a model token claims word {index} of a {words}-word document")]
+    WordIndexOutOfRange { index: usize, words: usize },
+
+    /// A checkpoint's declared label inventory has no columns at all, so
+    /// nothing can be decoded from it. Distinguished from "decoded and found
+    /// nothing", which is a result rather than a failure.
+    #[error("the checkpoint declares an empty label inventory")]
+    EmptyScheme,
 
     /// More ensemble members than [`crate::DetectorId`] can distinguish.
     /// Refused rather than wrapped, because a wrapped index gives two models
@@ -208,6 +231,8 @@ mod tests {
                 end: 14,
                 len: 51,
             },
+            NerError::WordIndexOutOfRange { index: 7, words: 2 },
+            NerError::EmptyScheme,
             NerError::TooManyDetectors { max: 65_536 },
             NerError::Span(crate::Error::SpanNotOrdered { start: 5, end: 5 }),
         ] {

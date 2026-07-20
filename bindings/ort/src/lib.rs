@@ -31,6 +31,11 @@
 //!
 //! # Weights
 //!
+//! Weights come from a LOCAL DIRECTORY the operator names -- see [`model`],
+//! which resolves and validates one and derives the BIO conversion its head
+//! decodes through. There is no hub id anywhere in this crate and no resolver
+//! that could grow one.
+//!
 //! This crate never downloads anything. There is no lazy fetch at inference
 //! (I1) and no fetch at build time either -- see the long comment in
 //! `Cargo.toml` for why the `ort` dependency is admitted deliberately rather
@@ -43,6 +48,10 @@
 //! [`StubSession`] implements [`Session`] over canned logits, so the entire
 //! path -- session, detector, ensemble, constrained decode, alignment, union --
 //! is exercised by this crate's tests with no `.onnx` file anywhere on disk.
+
+pub mod model;
+
+pub use model::{ModelDir, ModelError};
 
 use std::fmt;
 use std::sync::OnceLock;

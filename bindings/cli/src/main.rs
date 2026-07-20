@@ -56,6 +56,7 @@ mod doctor;
 #[cfg(test)]
 mod fixtures;
 mod format;
+mod l2;
 mod l3;
 mod mask;
 mod maskfile;
@@ -70,6 +71,7 @@ use std::time::SystemTime;
 
 use config::{CliFlags, Config, EnvView};
 use deid_tr_core::Tier;
+use l2::{L2Config, L2Flags};
 use l3::{L3Config, L3Flags};
 
 /// The running version, from the workspace manifest.
@@ -123,6 +125,17 @@ enum Command {
     },
 }
 
+/// The per-layer configuration one run resolves to.
+///
+/// Grouped rather than passed as two parameters, for the reason `mask::Build`
+/// gives for grouping its own three: they always travel together and always
+/// come from the same resolution, and threading them separately turns every
+/// call site into positional soup one layer at a time.
+struct Layers<'a> {
+    l3: &'a L3Config,
+    l2: &'a L2Config,
+}
+
 /// The two directories a batch run needs.
 struct BatchTargets {
     input: String,
@@ -130,7 +143,15 @@ struct BatchTargets {
     recursive: bool,
 }
 
-fn parse_args(args: &[String]) -> (CliFlags, L3Flags, Command) {
+/// The per-layer paths, so `parse_args` keeps one return value for "everything
+/// the layers were told" instead of growing a tuple element per layer.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct LayerFlags {
+    l3: L3Flags,
+    l2: L2Flags,
+}
+
+fn parse_args(args: &[String]) -> (CliFlags, LayerFlags, Command) {
     let mut flags = CliFlags::default();
     let mut rest = Vec::new();
     for arg in args {
@@ -142,7 +163,11 @@ fn parse_args(args: &[String]) -> (CliFlags, L3Flags, Command) {
     }
 
     let Some(verb) = rest.first().map(String::as_str) else {
-        return (flags, L3Flags::default(), Command::Usage { unknown: false });
+        return (
+            flags,
+            LayerFlags::default(),
+            Command::Usage { unknown: false },
+        );
     };
     let tail = &rest[1..];
     let value_of = |name: &str| {
@@ -156,9 +181,14 @@ fn parse_args(args: &[String]) -> (CliFlags, L3Flags, Command) {
     // this invocation would actually use, and reporting a different resolution
     // than the one `mask` would perform is how a diagnostic command starts
     // lying.
-    let l3_flags = L3Flags {
-        model: value_of("--model"),
-        runtime: value_of("--runtime"),
+    let l3_flags = LayerFlags {
+        l3: L3Flags {
+            model: value_of("--model"),
+            runtime: value_of("--runtime"),
+        },
+        l2: L2Flags {
+            model: value_of(l2::FLAG),
+        },
     };
 
     let command = match verb {
@@ -179,6 +209,7 @@ fn parse_args(args: &[String]) -> (CliFlags, L3Flags, Command) {
                 "--out",
                 "--model",
                 "--runtime",
+                l2::FLAG,
             ];
             let taken: Vec<String> = valued.iter().filter_map(|name| value_of(name)).collect();
             let path = tail
@@ -235,7 +266,14 @@ fn parse_args(args: &[String]) -> (CliFlags, L3Flags, Command) {
             };
             // Same rule as `mask`: every flag that takes a value is listed
             // once, so a value can never be mistaken for the positional input.
-            let valued = ["--tier", "--out", "--input-format", "--model", "--runtime"];
+            let valued = [
+                "--tier",
+                "--out",
+                "--input-format",
+                "--model",
+                "--runtime",
+                l2::FLAG,
+            ];
             let taken: Vec<String> = valued.iter().filter_map(|name| value_of(name)).collect();
             let input = tail
                 .iter()
@@ -289,12 +327,13 @@ fn parse_args(args: &[String]) -> (CliFlags, L3Flags, Command) {
 /// One read, because two would let the updater and L3 disagree about what the
 /// machine says -- and `deid doctor` exists to report exactly what `deid mask`
 /// would use.
-fn load_config(flags: &CliFlags, l3_flags: &L3Flags) -> (Config, L3Config) {
+fn load_config(flags: &CliFlags, layers: &LayerFlags) -> (Config, L3Config, L2Config) {
     let env = EnvView::from_process();
     let file = config::load_file(&env).unwrap_or_default();
     (
         config::resolve(flags, &env, &file),
-        l3::resolve(l3_flags, &env, &file),
+        l3::resolve(&layers.l3, &env, &file),
+        l2::resolve(&layers.l2, &env, &file),
     )
 }
 
@@ -373,7 +412,7 @@ fn run_batch(
     targets: &BatchTargets,
     tier: Tier,
     opts: mask::Opts,
-    l3: &L3Config,
+    layers: &Layers<'_>,
     format: format::Format,
     threshold: Option<f32>,
     stderr: &mut dyn Write,
@@ -396,7 +435,8 @@ fn run_batch(
         std::path::Path::new(output),
         tier,
         options,
-        l3,
+        layers.l3,
+        layers.l2,
         stderr,
     ) {
         Ok(summary) => summary,
@@ -433,8 +473,8 @@ fn run_batch(
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (flags, l3_flags, command) = parse_args(&args);
-    let (config, l3) = load_config(&flags, &l3_flags);
+    let (flags, layer_flags, command) = parse_args(&args);
+    let (config, l3, l2) = load_config(&flags, &layer_flags);
 
     let mut stderr = std::io::stderr();
     // Before anything else, including before any check is spawned: nobody
@@ -467,7 +507,15 @@ fn main() -> ExitCode {
             format,
             threshold,
             batch: Some(targets),
-        } => run_batch(&targets, tier, opts, &l3, format, threshold, &mut stderr),
+        } => run_batch(
+            &targets,
+            tier,
+            opts,
+            &Layers { l3: &l3, l2: &l2 },
+            format,
+            threshold,
+            &mut stderr,
+        ),
         Command::Mask {
             path,
             tier,
@@ -483,6 +531,7 @@ fn main() -> ExitCode {
                     tier,
                     opts,
                     l3: &l3,
+                    l2: &l2,
                 },
                 format,
                 threshold,
@@ -525,6 +574,7 @@ fn main() -> ExitCode {
                     tier,
                     opts,
                     l3: &l3,
+                    l2: &l2,
                 },
                 input_format,
                 allow_images,
@@ -549,7 +599,7 @@ fn main() -> ExitCode {
             // stdout, not stderr: this is the command's OUTPUT, and an operator
             // sending it to a colleague should be able to pipe it.
             let mut stdout = std::io::stdout();
-            let _ = doctor::report(&l3, &mut stdout);
+            let _ = doctor::report(&l3, &l2, &mut stdout);
             ExitCode::SUCCESS
         }
         Command::Update => {
@@ -601,6 +651,7 @@ fn main() -> ExitCode {
                         [--no-medical-allowlist]            run L4 with no medical vocabulary; carcinoma, costa and Adalat will be masked\n\
                         [--model FILE.gguf]                 LOCAL weights for the L3 sweep; required by --tier expert\n\
                         [--runtime BIN]                     LOCAL inference executable for the L3 sweep; required by --tier expert\n\
+                        [--l2-model DIR]                    LOCAL directory holding the L2 ONNX checkpoint and its tokenizer\n\
                    mask-file IN --out OUT                   de-identify a PDF, DOCX, CSV, JSON or JSONL file\n\
                         [--input-format auto|txt|csv|json|jsonl|docx|pdf]  default auto: content first, name second\n\
                         [--out -]                           write the redacted bytes to stdout instead of a file\n\
@@ -610,8 +661,8 @@ fn main() -> ExitCode {
                    pull [--from DIR]                        fetch model weights (not implemented)\n\
                    version                                  print the version\n\
                  \n\
-                 COVERAGE: rule-detectable identifiers only. L2 has no trained model in this\n\
-                 build, so deid masks NO NAMES. TCKN, VKN, SGK, IBAN, phone, MRN, email and\n\
+                 COVERAGE: rule-detectable identifiers only. This build has NO ONNX Runtime\n\
+                 linked, so L2 cannot run and deid masks NO NAMES. TCKN, VKN, SGK, IBAN, phone, MRN, email and\n\
                  dates are masked; PATIENT_NAME, CLINICIAN_NAME and RELATIVE_NAME are not.\n\
                  --tier expert does not change that: it adds the L3 quasi-identifier sweep,\n\
                  which still masks no names. Run `deid doctor` for this machine's answer.\n\
@@ -621,6 +672,13 @@ fn main() -> ExitCode {
                  in your config file (flag > env > config file). No weights ship with this\n\
                  repository and nothing is downloaded at inference time. If L3 cannot be\n\
                  wired, the run FAILS -- it never falls back to Safe Harbor.\n\
+                 \n\
+                 --l2-model DIR names a checkpoint DIRECTORY on this machine (or DEID_L2_MODEL,\n\
+                 or l2_model in your config file; flag > env > config file). It is never a\n\
+                 model id and nothing is downloaded. This build validates the directory and\n\
+                 then REFUSES, because no inference runtime is linked: it masks no names with\n\
+                 the flag and no names without it, and it never falls back to running L1 alone\n\
+                 after you asked for a model.\n\
                  \n\
                  A --batch run never skips a file: every entry gets a manifest record, every\n\
                  failure is recorded, the run continues, and the exit code is non-zero if any\n\
@@ -644,6 +702,54 @@ mod tests {
 
     fn args(raw: &[&str]) -> Vec<String> {
         raw.iter().map(|a| (*a).to_owned()).collect()
+    }
+
+    #[test]
+    fn the_l2_model_flag_is_read_and_its_value_is_not_taken_for_the_document() {
+        // The bug this listing exists to prevent: a valued flag missing from
+        // `valued` makes its VALUE the positional input, so
+        // `deid mask --l2-model ./ckpt note.txt` would try to mask `./ckpt` and
+        // leave `note.txt` alone. In this tool that is an unredacted document
+        // the operator believes was redacted.
+        for raw in [
+            vec!["mask", "--l2-model", "./ckpt", "note.txt"],
+            vec!["mask", "note.txt", "--l2-model", "./ckpt"],
+        ] {
+            let (_, layers, command) = parse_args(&args(&raw));
+            assert_eq!(layers.l2.model.as_deref(), Some("./ckpt"));
+            match command {
+                Command::Mask { path, .. } => assert_eq!(path.as_deref(), Some("note.txt")),
+                _ => panic!("mask was not parsed"),
+            }
+        }
+
+        // And `mask-file`, which has its own list and its own positional.
+        let (_, layers, command) = parse_args(&args(&[
+            "mask-file",
+            "--l2-model",
+            "./ckpt",
+            "in.pdf",
+            "--out",
+            "out.pdf",
+        ]));
+        assert_eq!(layers.l2.model.as_deref(), Some("./ckpt"));
+        match command {
+            Command::MaskFile { input, .. } => assert_eq!(input, "in.pdf"),
+            _ => panic!("mask-file was not parsed"),
+        }
+    }
+
+    #[test]
+    fn no_l2_flag_means_no_l2_configuration() {
+        // The unchanged default path, asserted rather than assumed.
+        let (_, layers, _) = parse_args(&args(&["mask", "note.txt"]));
+        assert_eq!(layers.l2, L2Flags::default());
+        assert!(l2::resolve(
+            &layers.l2,
+            &EnvView::default(),
+            &config::FileConfig::default()
+        )
+        .is_unconfigured());
     }
 
     #[test]

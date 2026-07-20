@@ -5,8 +5,8 @@ does not ship a model for that language.
     python3 scripts/gate_tokenizer.py --local-only ./vendor/berturk
     python3 scripts/gate_tokenizer.py --self-test
 
-Two independent conditions must hold before a backbone may be published for a
-language set, and either one alone rejects it.
+Four independent conditions must hold before a backbone may be published for a
+language set, and any one alone rejects it.
 
   1. CASING. No `*-uncased` backbone ships for Turkish, ever. Casing is the
      strongest single signal a name detector has, and Turkish lowercasing is
@@ -21,6 +21,24 @@ language set, and either one alone rejects it.
      every layer speaks byte offsets, Turkish letters are multi-byte, and a
      tokenizer whose offsets are off by a byte produces spans that leak a
      suffix or clip a name.
+
+  3. LETTER DISTINCTION. I, i, dotted-I and dotless-i are FOUR letters, and a
+     round-trip check does not prove a tokenizer keeps them apart. A
+     vocabulary that maps both capitals to one unknown token round-trips
+     perfectly through a decoder that pretty-prints the original string, and
+     still hands the model identical ids for `Isik` and `Isik`-with-dots. So
+     the gate additionally asserts that minimal pairs differing ONLY in the
+     dotted/dotless letter encode to DIFFERENT id sequences. Cased is not the
+     same as lossless, and this is the condition that tells them apart.
+
+  4. WORD ALIGNMENT. The L2 runtime feeds this tokenizer PRE-SPLIT WORDS
+     (`is_split_into_words`) and keeps the first WordPiece label per word,
+     because the checkpoints are fine-tuned that way -- see
+     `core/src/detect/words.rs`. That mode has its own failure surface: a word
+     that produces no piece is a word no span can ever be anchored to, and
+     word indices that do not arrive in order break the first-piece reduction.
+     Neither is visible in the offset check, so both are checked directly, in
+     the mode the product actually runs in.
 
 DECODE COMPARISON, and the one narrowing in it. `decode(encode(s)) == s` is the
 literal statement of losslessness, but a WordPiece decoder is a pretty-printer:
@@ -264,6 +282,35 @@ class Encoding:
 
 
 @dataclass(frozen=True)
+class WordEncoding:
+    """What the gate needs from a PRE-SPLIT encode.
+
+    `word_ids` is one entry per model token, `None` for a special token and
+    otherwise the index of the word the piece came from -- exactly the vector
+    `core/src/detect/words.rs` consumes to give every piece its word's span.
+    """
+
+    ids: tuple[int, ...]
+    word_ids: tuple[int | None, ...]
+
+
+# Minimal pairs differing ONLY in a dotted/dotless letter. A tokenizer that
+# gives any pair the same ids has merged two Turkish letters, whatever its
+# decoder prints back. Every entry is an ordinary word or letter, never a name
+# from a record (I8).
+LETTER_PAIRS: Final[tuple[tuple[str, str], ...]] = (
+    ("\u0130", "I"),
+    ("\u0131", "i"),
+    ("\u0130z", "Iz"),
+    ("\u0130l", "Il"),
+    ("k\u0131sa", "kisa"),
+    ("sar\u0131", "sari"),
+    ("\u0130lk", "Ilk"),
+    ("\u0131s\u0131", "isi"),
+)
+
+
+@dataclass(frozen=True)
 class ProbeFailure:
     """One probe failing one check."""
 
@@ -295,6 +342,21 @@ class _StubTokenizer:
 
     def decode(self, ids: Sequence[int]) -> str:
         raise NotImplementedError
+
+    def encode_words(self, words: Sequence[str]) -> WordEncoding:
+        """Encode each word separately and tag its pieces with its index.
+
+        A DEFAULT rather than an abstract method: every stub below wants the
+        same behaviour, and a stub that had to reimplement it would be a stub
+        whose own bug the self-test mistook for a finding.
+        """
+        ids: list[int] = []
+        word_ids: list[int | None] = []
+        for index, word in enumerate(words):
+            pieces = self.encode(word).ids
+            ids.extend(pieces)
+            word_ids.extend(index for _ in pieces)
+        return WordEncoding(ids=tuple(ids), word_ids=tuple(word_ids))
 
 
 def casing_violation(model_id: str, languages: Sequence[str]) -> str | None:
@@ -487,6 +549,120 @@ def check_offsets(tokenizer: Any, probe: str, group: str) -> list[ProbeFailure]:
     return failures
 
 
+def check_letter_distinction(tokenizer: Any) -> list[ProbeFailure]:
+    """Assert the four Turkish i-letters are four letters to the vocabulary.
+
+    A ROUND-TRIP DOES NOT PROVE THIS. `decode(encode(s)) == s` holds for a
+    vocabulary that maps every unseen capital to one unknown token, because the
+    decoder is asked to reproduce a string it was handed rather than to
+    distinguish two. The model, meanwhile, receives identical ids for two
+    different Turkish words -- and casing is the strongest name signal a
+    detector has, so a merged capital is a name signal destroyed before the
+    model ever sees it. `-uncased` is refused by rule; this is the check that
+    catches a nominally cased vocabulary doing the same thing in practice.
+    """
+    failures: list[ProbeFailure] = []
+    for dotted, dotless in LETTER_PAIRS:
+        left = tokenizer.encode(dotted)
+        right = tokenizer.encode(dotless)
+        if left.ids != right.ids:
+            continue
+        failures.append(
+            ProbeFailure(
+                group="dotted_dotless_i",
+                probe=f"{dotted} / {dotless}",
+                kind="letters_merged",
+                detail=(
+                    f"{dotted!r} and {dotless!r} encode to the same ids "
+                    f"{left.ids!r}. They are different Turkish letters, so the "
+                    "model cannot tell the two words apart no matter what the "
+                    "decoder prints back. A vocabulary that merges them cannot "
+                    "carry Turkish names."
+                ),
+            )
+        )
+    return failures
+
+
+def check_word_alignment(tokenizer: Any, probe: str, group: str) -> list[ProbeFailure]:
+    """Assert the PRE-SPLIT path yields one usable label position per word.
+
+    This is the mode the product runs in: `core/src/detect/words.rs` splits the
+    note into whitespace-delimited words, the tokenizer encodes them pre-split,
+    and every piece inherits its WORD's byte span so that no subword offset is
+    ever trusted. Two properties have to hold for that reduction to be sound,
+    and neither is implied by the offset check.
+    """
+    words = probe.split()
+    if not words:
+        return []
+    try:
+        encoding = tokenizer.encode_words(words)
+    except NotImplementedError:
+        return [
+            ProbeFailure(
+                group=group,
+                probe=probe,
+                kind="words_unsupported",
+                detail=(
+                    "the tokenizer cannot encode a pre-split word list, which is "
+                    "the mode the L2 runtime uses. A backbone that cannot report "
+                    "word ids cannot be decoded with first-piece-per-word labels."
+                ),
+            )
+        ]
+
+    failures: list[ProbeFailure] = []
+    seen = [index for index in encoding.word_ids if index is not None]
+
+    missing = [index for index in range(len(words)) if index not in set(seen)]
+    if missing:
+        failures.append(
+            ProbeFailure(
+                group=group,
+                probe=probe,
+                kind="word_dropped",
+                detail=(
+                    f"words at indices {missing} produced no token, so "
+                    f"{[words[index] for index in missing]!r} can never carry a "
+                    "label. A word no span can be anchored to is a word whose "
+                    "identifier is silently unmaskable."
+                ),
+            )
+        )
+
+    if any(later < earlier for earlier, later in zip(seen, seen[1:])):
+        failures.append(
+            ProbeFailure(
+                group=group,
+                probe=probe,
+                kind="word_order",
+                detail=(
+                    f"word ids are not non-decreasing: {seen!r}. The runtime "
+                    "collapses each maximal run of equal word ids to that word's "
+                    "first piece, so interleaved ids split one word into several "
+                    "spans or merge two words into one."
+                ),
+            )
+        )
+
+    out_of_range = [index for index in seen if index >= len(words)]
+    if out_of_range:
+        failures.append(
+            ProbeFailure(
+                group=group,
+                probe=probe,
+                kind="word_range",
+                detail=(
+                    f"word ids {out_of_range!r} name words beyond the "
+                    f"{len(words)} that were passed in; every span after one of "
+                    "these anchors to the wrong bytes."
+                ),
+            )
+        )
+    return failures
+
+
 def run_probes(
     tokenizer: Any,
     *,
@@ -503,6 +679,11 @@ def run_probes(
                 check_decode(tokenizer, probe, group.name, strict_decode=strict_decode)
             )
             failures.extend(check_offsets(tokenizer, probe, group.name))
+            failures.extend(check_word_alignment(tokenizer, probe, group.name))
+    # Once, not per probe: the pairs are their own corpus and repeating them
+    # inside every group would report the same defect dozens of times and bury
+    # everything else in the report.
+    failures.extend(check_letter_distinction(tokenizer))
     return checked, failures
 
 
@@ -573,6 +754,29 @@ class _LibraryTokenizer:
 
     def decode(self, ids: Sequence[int]) -> str:
         return str(self._backend.decode(list(ids), skip_special_tokens=True))
+
+    def encode_words(self, words: Sequence[str]) -> WordEncoding:
+        """Encode a PRE-SPLIT word list and report each piece's word index.
+
+        Both libraries support this and both spell it differently. Neither
+        result is post-processed here: the point of the check is what the
+        tokenizer actually reports, so a normalisation applied on the way out
+        would hide exactly the drift the gate exists to catch.
+        """
+        if self._kind == "tokenizers":
+            raw: Any = self._backend.encode(list(words), is_pretokenized=True)
+            return WordEncoding(
+                ids=tuple(int(value) for value in raw.ids),
+                word_ids=tuple(
+                    None if value is None else int(value) for value in raw.word_ids
+                ),
+            )
+        raw = self._backend(list(words), is_split_into_words=True)
+        indices = raw.word_ids()
+        return WordEncoding(
+            ids=tuple(int(value) for value in raw["input_ids"]),
+            word_ids=tuple(None if value is None else int(value) for value in indices),
+        )
 
 
 def _missing_dependency_error() -> GateError:
@@ -679,6 +883,67 @@ class _ByteOffsetTokenizer(_IdentityTokenizer):
         )
 
 
+class _MergingITokenizer(_IdentityTokenizer):
+    """Gives the dotted and dotless letters the SAME id, and still round-trips.
+
+    The decoder returns the string it was last handed, which is a caricature of
+    a real one and is the point: it isolates the property the round-trip check
+    cannot see. Every WordPiece decoder reconstructs a surface form, so a
+    vocabulary that has merged two letters can still print a plausible string
+    while the model has already lost the distinction. Without this stub the
+    letter check could be silently vacuous and the self-test would not notice.
+    """
+
+    _MERGED = {"\u0130": "I", "\u0131": "i"}
+
+    def __init__(self) -> None:
+        self._last = ""
+
+    def encode(self, text: str) -> Encoding:
+        self._last = text
+        folded = "".join(self._MERGED.get(character, character) for character in text)
+        return Encoding(
+            ids=tuple(ord(character) for character in folded),
+            offsets=tuple((index, index + 1) for index in range(len(text))),
+        )
+
+    def decode(self, ids: Sequence[int]) -> str:
+        return self._last
+
+
+class _DroppingWordTokenizer(_IdentityTokenizer):
+    """Emits no token for one word, so that word can never carry a label."""
+
+    def encode_words(self, words: Sequence[str]) -> WordEncoding:
+        ids: list[int] = []
+        word_ids: list[int | None] = [None]
+        for index, word in enumerate(words):
+            if index == 1:
+                continue
+            pieces = self.encode(word).ids
+            ids.extend(pieces)
+            word_ids.extend(index for _ in pieces)
+        return WordEncoding(ids=tuple(ids), word_ids=tuple(word_ids[1:]))
+
+
+class _InterleavingWordTokenizer(_IdentityTokenizer):
+    """Reports word ids out of order, which breaks the first-piece reduction."""
+
+    def encode_words(self, words: Sequence[str]) -> WordEncoding:
+        encoding = super().encode_words(words)
+        return WordEncoding(
+            ids=encoding.ids,
+            word_ids=tuple(reversed(encoding.word_ids)),
+        )
+
+
+class _NoWordsTokenizer(_IdentityTokenizer):
+    """Cannot encode a pre-split word list at all."""
+
+    def encode_words(self, words: Sequence[str]) -> WordEncoding:
+        raise NotImplementedError
+
+
 def _self_test() -> int:
     """Prove the gate has teeth: it must reject as well as accept.
 
@@ -752,6 +1017,61 @@ def _self_test() -> int:
         (
             "rejects a tokenizer reporting byte offsets as character offsets",
             drift_caught,
+        )
+    )
+
+    merged_failures = check_letter_distinction(_MergingITokenizer())
+    checks.append(
+        (
+            "rejects a vocabulary that merges dotted and dotless i",
+            any(failure.kind == "letters_merged" for failure in merged_failures),
+        )
+    )
+    checks.append(
+        (
+            "the letter check accepts a vocabulary that keeps them apart",
+            not check_letter_distinction(_IdentityTokenizer()),
+        )
+    )
+
+    sentence = "Hasta MRI'da carcinoma'li olarak raporlandi"
+    checks.append(
+        (
+            "rejects a tokenizer that drops a word from the pre-split encode",
+            any(
+                failure.kind == "word_dropped"
+                for failure in check_word_alignment(
+                    _DroppingWordTokenizer(), sentence, "word_alignment"
+                )
+            ),
+        )
+    )
+    checks.append(
+        (
+            "rejects word ids that do not arrive in order",
+            any(
+                failure.kind == "word_order"
+                for failure in check_word_alignment(
+                    _InterleavingWordTokenizer(), sentence, "word_alignment"
+                )
+            ),
+        )
+    )
+    checks.append(
+        (
+            "rejects a tokenizer with no pre-split encode at all",
+            any(
+                failure.kind == "words_unsupported"
+                for failure in check_word_alignment(
+                    _NoWordsTokenizer(), sentence, "word_alignment"
+                )
+            ),
+        )
+    )
+    checks.append(
+        (
+            "the word check accepts a tokenizer that aligns every word",
+            not check_word_alignment(_IdentityTokenizer(), sentence, "word_alignment"),
         )
     )
 

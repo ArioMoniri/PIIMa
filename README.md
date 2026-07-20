@@ -54,6 +54,16 @@ The reason is boring: L2 is the neural NER ensemble and it has no trained checkp
 The decode path, the union logic, the adjudicator, the surrogates and the file formats are all
 built and tested. The model is not. See [what would actually help](#-what-would-actually-help).
 
+**There is now a first candidate, and it changes nothing above.**
+[`ytu-ce-cosmos/modernbert-tr-pii-ner`](https://huggingface.co/ytu-ce-cosmos/modernbert-tr-pii-ner)
+is a cased, Apache-2.0, KVKK-labelled Turkish PII checkpoint, and it is the first one worth putting
+behind the L2 seam. It has **not been downloaded, not been run and not been evaluated against our
+corpus**, no weights ship here, and no command in this repository loads one yet. Every sentence on
+this page about zero names masked is still true today. What it is, why we expect it to struggle on
+clinical text, and the commands that would produce the first real number are in
+[`docs/L2-CANDIDATES.md`](docs/L2-CANDIDATES.md); the decision and its costs are D-042 in
+[`docs/DECISIONS.md`](docs/DECISIONS.md).
+
 **Do not put real patient data through this and send the output anywhere.** For masking names in
 Turkish clinical text today, use OpenMed. That recommendation is written down in
 [`docs/COMPARISON.md`](docs/COMPARISON.md) section 5 and it has not changed.
@@ -158,7 +168,7 @@ that test found a real hole: `bind::plan` refused the dotted quad and `::` but n
 
 | | State | Blocker |
 |---|---|---|
-| **L2** neural NER | no model | a fine-tuned Turkish clinical checkpoint. This is the one that matters |
+| **L2** neural NER | no model, one candidate named | a fine-tuned Turkish clinical checkpoint. This is the one that matters. `ytu-ce-cosmos/modernbert-tr-pii-ner` is the first candidate ([`docs/L2-CANDIDATES.md`](docs/L2-CANDIDATES.md), D-042): unfetched, unrun, unmeasured, and not loadable by any command here |
 | **L3** contextual sweep | built, unmeasured | the whole path ships and runs against a mock. Coverage is 0.0000 because no model has been selected and evaluated. You supply the weights |
 | **Python binding** | not built here | `pyo3` is not in the offline cache. Excluded from the cargo workspace |
 | **Tauri desktop/mobile** | configured, unbuilt | no artifact has been produced or tested |
@@ -262,6 +272,42 @@ fact that a *server* deployment breaks "PHI never leaves the device" by construc
 the span map, which is the PHI with the narrative stripped off and an index attached, and is the
 most sensitive structure in the product. Read it before serving anything.
 [`docs/DEPLOY.md`](docs/DEPLOY.md) covers `build-all`, `package` and `install`.
+
+### Producing the first real L2 number
+
+None of this runs as part of a build or a test, and none of it has been run. It downloads weights
+and runs inference, so it belongs on a server. Steps 1, 3 and 4 have entry points that do not exist
+yet; this is the shape of the work, not a script to paste.
+
+```bash
+# 0. Commit first. A dirty tree records eval_sha = uncommitted, and a run pinned
+#    to `uncommitted` cannot ship on a model card (I5).
+
+# 1. Admit the ONNX runtime. ONE online resolve, reviewed, rewrites Cargo.lock.
+#    default-features = false is what drops ort's build-time download-binaries
+#    fetch. The exact lines are in bindings/ort/Cargo.toml.
+cargo fetch
+
+# 2. Fetch the checkpoint and PIN THE REVISION. A Hugging Face repo is mutable,
+#    so a name without a revision is not provenance (D-042).
+huggingface-cli download ytu-ce-cosmos/modernbert-tr-pii-ner \
+  --revision <COMMIT-SHA> --local-dir ./models/modernbert-tr-pii-ner
+
+# 3. Gate the tokenizer BEFORE anything else (I6). If it fails, stop: the
+#    checkpoint does not publish for Turkish whatever it scores.
+.venv/bin/python scripts/gate_tokenizer.py --local-only ./models/modernbert-tr-pii-ner
+
+# 4. Score it on our corpus, our labels, our floors.
+python3 -m eval.redteam.runner --masker pipeline --out eval/results/redteam.json
+python3 eval/run.py --detector pipeline --redteam-report eval/results/redteam.json
+
+# 5. Read the per-entity recall table. Never the aggregate.
+```
+
+Expect a drop against their published figure. They evaluated on web, legal and synthetic text and
+we evaluate on clinical notes, and finding out how far it falls is the entire point.
+[`docs/L2-CANDIDATES.md`](docs/L2-CANDIDATES.md) says why, in full, and was written before anything
+was run so the prediction cannot be retrofitted to the result.
 
 ---
 
@@ -537,6 +583,12 @@ Air-gapped installs are detected and stop checking.
 
 **A Turkish clinical NER checkpoint, or annotated Turkish clinical text under a DUA.** That is the
 single blocker on L2, and every ❌ above turns into a real number the day it exists.
+
+The nearest thing that exists is `ytu-ce-cosmos/modernbert-tr-pii-ner`, and it is not clinical: it
+was trained on Turkish web PDFs, anonymized high-court decisions and synthetic documents. It is the
+first candidate anyway, for the reasons in [`docs/L2-CANDIDATES.md`](docs/L2-CANDIDATES.md). What
+would help most is somebody running the sequence above on a server and telling us the per-entity
+recall, including if it is bad. A measured failure is a contribution.
 
 To be explicit about why we cannot just train on what is here: the 190 gold documents are the
 *test set*. Training on them destroys the benchmark, and the benchmark is the point.

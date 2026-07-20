@@ -129,6 +129,8 @@ pub struct EnvView {
     pub l3_model: Option<String>,
     /// `DEID_L3_RUNTIME`: the local inference executable for the L3 sweep.
     pub l3_runtime: Option<String>,
+    /// `DEID_L2_MODEL`: the local directory holding the L2 ONNX checkpoint.
+    pub l2_model: Option<String>,
 }
 
 impl EnvView {
@@ -144,6 +146,7 @@ impl EnvView {
             home: get("HOME"),
             l3_model: get(crate::l3::ENV_MODEL),
             l3_runtime: get(crate::l3::ENV_RUNTIME),
+            l2_model: get(crate::l2::ENV_MODEL),
         }
     }
 
@@ -212,6 +215,14 @@ pub struct FileConfig {
     pub l3_model: Option<String>,
     /// `l3_runtime`: the local inference executable for the L3 sweep.
     pub l3_runtime: Option<String>,
+    /// `l2_model`: the local DIRECTORY holding the L2 ONNX checkpoint and its
+    /// tokenizer.
+    ///
+    /// A LOCAL PATH, for the same structural reason `l3_model` is: there is no
+    /// key in this file that can point any layer at something which is not on
+    /// this disk, so no configuration edit can turn an inference run into a
+    /// network call. See `src/l2.rs`.
+    pub l2_model: Option<String>,
 }
 
 /// Parse `key = value` lines, `#` to end of line is a comment.
@@ -247,6 +258,7 @@ pub fn parse_file(text: &str) -> Result<FileConfig, ConfigError> {
             "update_public_key" => out.public_key = Some(value.to_owned()),
             "l3_model" => out.l3_model = Some(value.to_owned()),
             "l3_runtime" => out.l3_runtime = Some(value.to_owned()),
+            "l2_model" => out.l2_model = Some(value.to_owned()),
             _ => return Err(ConfigError::UnknownKey { line }),
         }
     }
@@ -511,10 +523,13 @@ mod tests {
     #[test]
     fn the_file_parses_the_l3_paths() {
         let parsed =
-            parse_file("l3_model = \"/opt/m.gguf\"\nl3_runtime = \"/usr/bin/llama-cli\"\n")
+            parse_file(
+                "l3_model = \"/opt/m.gguf\"\nl3_runtime = \"/usr/bin/llama-cli\"\nl2_model = \"/opt/ckpt\"\n"
+            )
                 .expect("valid config");
         assert_eq!(parsed.l3_model.as_deref(), Some("/opt/m.gguf"));
         assert_eq!(parsed.l3_runtime.as_deref(), Some("/usr/bin/llama-cli"));
+        assert_eq!(parsed.l2_model.as_deref(), Some("/opt/ckpt"));
     }
 
     #[test]

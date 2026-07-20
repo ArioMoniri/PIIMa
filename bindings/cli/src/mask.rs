@@ -63,6 +63,15 @@ pub enum MaskError {
          use `deid mask-file IN --out OUT` if it is a PDF, DOCX, CSV, JSON or JSONL file"
     )]
     UnknownContainer,
+    /// A checkpoint was configured for L2 and could not be used.
+    ///
+    /// A SEPARATE VARIANT AND A HARD FAILURE, for the same reason
+    /// [`MaskError::Contextual`] is one. There is no branch that reacts to an
+    /// unusable checkpoint by running rules-only: an operator who asked for the
+    /// NER ensemble and silently got L1 alone has a document they believe is
+    /// more masked than it is.
+    #[error("{0}")]
+    Ner(#[from] crate::l2::L2Error),
     /// The Expert Determination tier was asked for and L3 could not be wired.
     ///
     /// A SEPARATE VARIANT RATHER THAN A FALLBACK. There is no branch anywhere in
@@ -119,6 +128,10 @@ pub struct Build<'a> {
     /// The two local paths L3 is built from. Unused outside Expert
     /// Determination, and required inside it.
     pub l3: &'a crate::l3::L3Config,
+    /// The local directory L2's checkpoint is loaded from. Absent by default,
+    /// in which case no ensemble is installed and the pipeline is exactly the
+    /// one this binary has always shipped.
+    pub l2: &'a crate::l2::L2Config,
 }
 
 /// Turn a pipeline failure into the most specific thing that can be said.
@@ -146,6 +159,13 @@ pub(crate) fn classify(error: deid_tr_core::Error) -> MaskError {
 /// construct.
 pub(crate) fn build(spec: &Build<'_>) -> Result<Pipeline, MaskError> {
     let mut pipeline = Pipeline::new(spec.tier);
+    // L2 IS INSTALLED WHENEVER A CHECKPOINT IS CONFIGURED, and a configured
+    // checkpoint that cannot be used is fatal here rather than at the first
+    // document. `ensemble` returns `Ok(None)` only when nothing was configured
+    // at any layer, which is the unchanged default path.
+    if let Some(ensemble) = crate::l2::ensemble(spec.l2)? {
+        pipeline = pipeline.with_ensemble(ensemble);
+    }
     // L3 IS INSTALLED WHENEVER THE TIER ASKS FOR IT, and its absence is fatal
     // here rather than at the first document. `Pipeline::propose` would refuse
     // an Expert Determination run with no contextual layer anyway, but that
@@ -292,6 +312,7 @@ mod tests {
                 tier: Tier::SafeHarbor,
                 opts: Opts::default(),
                 l3: &crate::l3::L3Config::default(),
+                l2: &crate::l2::L2Config::default(),
             },
             Format::Text,
             None,
@@ -332,6 +353,7 @@ mod tests {
                 tier: Tier::SafeHarbor,
                 opts: Opts::default(),
                 l3: &crate::l3::L3Config::default(),
+                l2: &crate::l2::L2Config::default(),
             },
             Format::Text,
             None,
@@ -379,6 +401,7 @@ mod tests {
                 tier: Tier::SafeHarbor,
                 opts: Opts::default(),
                 l3: &crate::l3::L3Config::default(),
+                l2: &crate::l2::L2Config::default(),
             },
             Format::Text,
             None,
@@ -396,10 +419,12 @@ mod tests {
         // tests/vocabulary_is_reachable.rs -- both exist because a builder that
         // is correct and never called is exactly what was wrong here.
         let l3 = crate::l3::L3Config::default();
+        let l2 = crate::l2::L2Config::default();
         let pipeline = build(&Build {
             tier: Tier::SafeHarbor,
             opts: Opts::default(),
             l3: &l3,
+            l2: &l2,
         })
         .expect("build");
         assert!(pipeline.allowlist().contains("costa"));
@@ -412,6 +437,7 @@ mod tests {
                 no_medical_allowlist: true,
             },
             l3: &l3,
+            l2: &l2,
         })
         .expect("build");
         assert!(!opted_out.allowlist().contains("costa"));
@@ -430,6 +456,7 @@ mod tests {
             tier: Tier::ExpertDetermination,
             opts: Opts::default(),
             l3: &crate::l3::L3Config::default(),
+            l2: &crate::l2::L2Config::default(),
         });
         let error = match built {
             Ok(_) => panic!("expert with no model must not build a pipeline"),
